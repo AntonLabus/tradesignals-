@@ -1,6 +1,18 @@
 "use client";
 import React, { useState } from 'react';
-import TradingViewWidget from 'react-tradingview-widget';
+import dynamic from 'next/dynamic';
+// Define props for TradingViewWidget
+interface TradingViewWidgetProps {
+  symbol: string;
+  autosize?: boolean;
+  theme?: string;
+  interval?: string;
+}
+// Dynamically import TradingViewWidget on client only with correct typing
+const TradingViewWidget = dynamic<TradingViewWidgetProps>(
+  () => import('react-tradingview-widget').then((mod) => mod.default),
+  { ssr: false }
+);
 import TimeframeSelector from './TimeframeSelector';
 
 export interface NewsItem { title: string; url: string; }

@@ -9,7 +9,7 @@ function isCrypto(pair: string) {
   return ['BTC', 'ETH', 'LTC', 'XRP', 'BNB', 'ADA', 'DOGE'].includes(base.toUpperCase());
 }
 
-export async function generateMetadata({ params }: { params: { pair: string } }): Promise<Metadata> {
+export async function generateMetadata({ params, searchParams }: Readonly<{ params: { pair: string }; searchParams: Record<string, string | string[]> }>): Promise<Metadata> {
   const { pair } = params;
   return {
     title: `${pair} · Signal Detail · TradeSignals`,
@@ -17,7 +17,7 @@ export async function generateMetadata({ params }: { params: { pair: string } })
   };
 }
 
-export default async function SignalDetailPage({ params }: { params: { pair: string } }) {
+export default async function SignalDetailPage({ params, searchParams }: Readonly<{ params: { pair: string }; searchParams: Record<string, string | string[]> }>) {
   const pair = decodeURIComponent(params.pair);
   if (!pair) notFound();
 

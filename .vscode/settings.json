@@ -1,0 +1,7 @@
+{
+  // Disable built-in CSS/SCSS validation to allow Tailwind directives
+  "css.validate": false,
+  "scss.validate": false,
+  "css.lint.unknownAtRules": "ignore",
+  "scss.lint.unknownAtRules": "ignore"
+}

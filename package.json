@@ -1,0 +1,39 @@
+{
+  "name": "tradesignals",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "test": "jest"
+  },
+  "dependencies": {
+    "axios": "^1.7.1",
+    "chart.js": "^4.3.0",
+    "next": "latest",
+    "next-themes": "^0.4.6",
+    "react": "latest",
+    "react-dom": "latest"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.28.0",
+    "@babel/preset-typescript": "^7.27.1",
+    "@testing-library/jest-dom": "^6.6.4",
+    "@testing-library/react": "^16.3.0",
+    "@types/jest": "^30.0.0",
+    "@types/react": "^19.1.9",
+    "autoprefixer": "^10.4.21",
+    "babel-jest": "^30.0.5",
+    "eslint": "latest",
+    "eslint-config-next": "latest",
+    "identity-obj-proxy": "^3.0.0",
+    "jest": "^30.0.5",
+    "jest-environment-jsdom": "^30.0.5",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.11",
+    "ts-jest": "^29.4.1",
+    "typescript": "latest"
+  }
+}

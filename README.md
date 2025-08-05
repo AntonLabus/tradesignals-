@@ -1,0 +1,49 @@
+# TradeSignals
+
+A multi-page trading signal website for Forex and Crypto built with Next.js, TypeScript, and Tailwind CSS.
+
+## Features
+- Home page with overview of signal generation methodology.
+- Signals Dashboard listing active signals for Forex and Crypto pairs.
+- Detailed signal pages with chart, confidence score, recommended levels, and explanation.
+- Multi-timeframe support (1m, 5m, 15m, 30m, 1H, 4H, 1D).
+- Light/Dark mode toggle and mobile-responsive design.
+
+## Getting Started
+
+### Install Dependencies
+
+```bash
+npm install
+```
+
+### Development
+
+```bash
+npm run dev
+```
+
+### Production Build
+
+```bash
+npm run build
+npm run start
+```
+
+### Lint
+
+```bash
+npm run lint
+```
+
+## Project Structure
+
+- `src/app/layout.tsx` - Root layout with navigation and global styles.
+- `src/app/page.tsx` - Home page.
+- `src/app/signals/page.tsx` - Signals dashboard.
+- `src/app/signals/[pair]/page.tsx` - Detailed signal breakdown.
+- `tailwind.config.js`, `postcss.config.js` - Tailwind CSS setup.
+
+## Deployment
+
+This project is configured for deployment on Netlify. Ensure the build command is `npm run build` and the publish directory is `.next`.

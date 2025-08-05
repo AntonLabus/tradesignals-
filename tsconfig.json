@@ -1,5 +1,7 @@
 {
   "compilerOptions": {
+    // Ensure TS resolves type declarations for React and custom types
+    "typeRoots": ["node_modules/@types", "src/types"],
     "target": "es5",
     "lib": ["dom", "dom.iterable", "esnext"],
     "allowJs": true,
@@ -15,6 +17,6 @@
     "isolatedModules": true,
     "jsx": "preserve"
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx"],
+  "include": ["next-env.d.ts", "src/types/**/*", "**/*.ts", "**/*.tsx"],
   "exclude": ["node_modules"]
 }

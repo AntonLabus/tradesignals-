@@ -9,16 +9,24 @@ function isCrypto(pair: string) {
   return ['BTC', 'ETH', 'LTC', 'XRP', 'BNB', 'ADA', 'DOGE'].includes(base.toUpperCase());
 }
 
-export async function generateMetadata({ params, searchParams }: Readonly<{ params: { pair: string }; searchParams: Record<string, string | string[]> }>): Promise<Metadata> {
-  const { pair } = params;
+export async function generateMetadata({ params, searchParams }: Readonly<{ 
+  params: Promise<{ pair: string }>; 
+  searchParams: Promise<Record<string, string | string[]>>; 
+}>): Promise<Metadata> {
+  const resolvedParams = await params;
+  const { pair } = resolvedParams;
   return {
     title: `${pair} · Signal Detail · TradeSignals`,
     description: `Detailed trading signal for ${pair}: confidence, levels, and analysis.`,
   };
 }
 
-export default async function SignalDetailPage({ params, searchParams }: Readonly<{ params: { pair: string }; searchParams: Record<string, string | string[]> }>) {
-  const pair = decodeURIComponent(params.pair);
+export default async function SignalDetailPage({ params, searchParams }: Readonly<{ 
+  params: Promise<{ pair: string }>; 
+  searchParams: Promise<Record<string, string | string[]>>; 
+}>) {
+  const resolvedParams = await params;
+  const pair = decodeURIComponent(resolvedParams.pair);
   if (!pair) notFound();
 
   // Determine asset class and fetch price

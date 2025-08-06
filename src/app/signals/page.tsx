@@ -38,17 +38,19 @@ export default async function SignalsPage({ searchParams }: SignalsPageProps) {
       } catch (error) {
         console.error('Error calculating signal for', pair, error);
         // Fallback signal to prevent crash
+        const assetClass: 'Crypto' | 'Forex' = /USDT$|USD$/.test(pair) ? 'Crypto' : 'Forex';
+        const typeValue = 'Hold' as const;
         return {
           pair,
-          assetClass: /USDT$|USD$/.exec(pair) ? 'Crypto' : 'Forex',
-          type: 'Hold' as const,
+          assetClass,
+          type: typeValue,
           confidence: 0,
           timeframe,
           buyLevel: 0,
           stopLoss: 0,
           takeProfit: 0,
           explanation: 'Error fetching data',
-          news: []
+          news: [] as { title: string; url: string }[],
         };
       }
     })

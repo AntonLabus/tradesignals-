@@ -42,6 +42,7 @@
     "ts-jest": "^29.4.1",
     "typescript": "latest",
     "@babel/preset-typescript": "^7.27.1",
-    "@babel/preset-react": "^7.22.5"
+    "@babel/preset-react": "^7.22.5",
+    "@babel/preset-env": "^7.22.5"
   }
 }

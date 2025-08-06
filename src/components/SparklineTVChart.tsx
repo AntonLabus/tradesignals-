@@ -1,24 +1,25 @@
 "use client";
 import dynamic from 'next/dynamic';
+import React from 'react';
 // Dynamically import TradingViewWidget for client-side only
-const TradingViewWidget = dynamic<TradingViewWidgetProps>(
+const TradingViewWidget: React.ComponentType<TradingViewWidgetProps> = dynamic<TradingViewWidgetProps>(
   () => import('react-tradingview-widget').then((mod) => mod.default),
   { ssr: false }
 );
 
 // Define props for TradingViewWidget
 interface TradingViewWidgetProps {
-  symbol: string;
-  autosize?: boolean;
-  width?: number;
-  height?: number;
-  interval?: string;
-  theme?: string;
+  readonly symbol: string;
+  readonly autosize?: boolean;
+  readonly width?: number;
+  readonly height?: number;
+  readonly interval?: string;
+  readonly theme?: string;
 }
 
 interface SparklineTVChartProps {
-  pair: string;
-  timeframe: string;
+  readonly pair: string;
+  readonly timeframe: string;
 }
 
 export default function SparklineTVChart({ pair, timeframe }: SparklineTVChartProps) {

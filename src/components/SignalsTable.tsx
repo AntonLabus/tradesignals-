@@ -1,6 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
-import SparklineTVChart from './SparklineTVChart';
+import SimpleChart from './SimpleChart';
 
 // Type for a trading signal row
 interface Signal {
@@ -36,10 +36,11 @@ const SignalsTable = ({ filtered }: SignalsTableProps) => {
         {filtered.map((signal: Signal) => (
           <tr key={signal.pair} className="block md:table-row">
             <td className="border px-4 py-2">
-              {/* Temporarily use placeholder until hydration issue is fully resolved */}
-              <div className="w-[120px] h-[60px] bg-gradient-to-r from-blue-100 to-green-100 flex items-center justify-center text-xs font-medium rounded">
-                📈 Chart
-              </div>
+              <SimpleChart 
+                pair={signal.pair}
+                signalType={signal.type}
+                confidence={signal.confidence}
+              />
             </td>
             <td className="border px-4 py-2">
               <Link

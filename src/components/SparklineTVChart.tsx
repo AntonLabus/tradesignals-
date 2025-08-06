@@ -1,25 +1,35 @@
 "use client";
 import dynamic from 'next/dynamic';
-import React, { useState, useEffect } from 'react';
-
-// Define props for TradingViewWidget
-interface TradingViewWidgetProps {
-  readonly symbol: string;
-  readonly autosize?: boolean;
-  readonly width?: number;
-  readonly height?: number;
-  readonly interval?: string;
-  readonly theme?: string;
-}
+import React from 'react';
+import { useIsClient } from '../hooks/useIsClient';
 
 interface SparklineTVChartProps {
   readonly pair: string;
   readonly timeframe: string;
 }
 
-// Dynamically import TradingViewWidget with no SSR
-const TradingViewWidget = dynamic<TradingViewWidgetProps>(
-  () => import('react-tradingview-widget').then((mod) => mod.default),
+// Create a completely client-side only TradingView component
+const ClientOnlyTradingView = dynamic(
+  () => {
+    return import('react-tradingview-widget').then((mod) => {
+      const TradingViewWidget = mod.default;
+      
+      return function TradingViewChart({ symbol, timeframe }: { symbol: string; timeframe: string }) {
+        return (
+          <div style={{ width: 120, height: 60 }}>
+            <TradingViewWidget
+              symbol={symbol}
+              autosize={false}
+              width={120}
+              height={60}
+              interval={timeframe}
+              theme="dark"
+            />
+          </div>
+        );
+      };
+    });
+  },
   { 
     ssr: false,
     loading: () => (
@@ -31,14 +41,10 @@ const TradingViewWidget = dynamic<TradingViewWidgetProps>(
 );
 
 export default function SparklineTVChart({ pair, timeframe }: SparklineTVChartProps) {
-  const [isMounted, setIsMounted] = useState(false);
+  const isClient = useIsClient();
 
-  useEffect(() => {
-    setIsMounted(true);
-  }, []);
-
-  // Don't render anything on server-side or until mounted
-  if (!isMounted) {
+  // Always return the same structure to prevent hydration mismatch
+  if (!isClient) {
     return (
       <div className="w-[120px] h-[60px] bg-gray-100 flex items-center justify-center text-xs">
         Chart
@@ -50,15 +56,6 @@ export default function SparklineTVChart({ pair, timeframe }: SparklineTVChartPr
   const symbol = pair.replace('/', '');
   
   return (
-    <div style={{ width: 120, height: 60 }}>
-      <TradingViewWidget
-        symbol={symbol}
-        autosize={false}
-        width={120}
-        height={60}
-        interval={timeframe}
-        theme="dark"
-      />
-    </div>
+    <ClientOnlyTradingView symbol={symbol} timeframe={timeframe} />
   );
 }

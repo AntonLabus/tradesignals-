@@ -1,5 +1,7 @@
 import SignalsTable from './SignalsTable';
+import TimeframeSelectorClient from '../../components/TimeframeSelectorClient';
 import { Metadata } from 'next';
+import { calculateSignal } from '../../lib/signals';
 
 type Signal = {
   pair: string;
@@ -17,18 +19,27 @@ export const metadata: Metadata = {
   description: 'Current active trading signals for Forex and Crypto pairs',
 };
 
-const mockSignals: Signal[] = [
-  { pair: 'EUR/USD', assetClass: 'Forex', type: 'Buy', confidence: 82, timeframe: '1H', buyLevel: 1.12, stopLoss: 1.1, takeProfit: 1.15 },
-  { pair: 'BTC/USD', assetClass: 'Crypto', type: 'Sell', confidence: 74, timeframe: '4H', buyLevel: 30000, stopLoss: 31000, takeProfit: 28000 },
-  { pair: 'USD/JPY', assetClass: 'Forex', type: 'Hold', confidence: 65, timeframe: '15m', buyLevel: 109.5, stopLoss: 109.0, takeProfit: 110.0 },
-];
+// Replace mock data with live fetch logic
+interface SignalsPageProps {
+  readonly searchParams?: { readonly timeframe?: string };
+}
+export default async function SignalsPage({ searchParams }: SignalsPageProps) {
+  // Define the pairs to display
+  const pairs = ['EUR/USD', 'USD/JPY', 'BTC/USD', 'ETH/USD'];
 
-export default function SignalsPage() {
+  // Determine timeframe from URL (default to 1H)
+  const timeframe = searchParams?.timeframe ?? '1H';
+  // Calculate signals using full trading rules engine
+  const signals = await Promise.all(
+    pairs.map(pair => calculateSignal(pair, timeframe))
+  );
+
   return (
     <div className="space-y-6">
+      {/* Client-side timeframe selector */}
+      <TimeframeSelectorClient />
       <h1 className="text-3xl font-bold">Active Signals</h1>
-      {/* Render the filtered signals table */}
-      <SignalsTable signals={mockSignals} />
+      <SignalsTable signals={signals} />
     </div>
   );
 }

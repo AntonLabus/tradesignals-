@@ -8,7 +8,7 @@ describe('TimeframeSelector', () => {
     render(<TimeframeSelector onChange={handleChange} />);
 
     // Check that default option is rendered
-    const select = screen.getByLabelText(/Timeframe/i) as HTMLSelectElement;
+    const select = screen.getByLabelText<HTMLSelectElement>(/Timeframe/i);
     expect(select).toBeInTheDocument();
     expect(select.value).toBe('1H');
 

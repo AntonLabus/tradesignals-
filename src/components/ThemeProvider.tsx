@@ -2,6 +2,10 @@
 import { ThemeProvider } from 'next-themes';
 import { ReactNode } from 'react';
 
-export default function NextThemesProvider({ children }: { children: ReactNode }) {
+interface NextThemesProviderProps {
+  readonly children: ReactNode;
+}
+
+export default function NextThemesProvider({ children }: NextThemesProviderProps) {
   return <ThemeProvider attribute="class">{children}</ThemeProvider>;
 }

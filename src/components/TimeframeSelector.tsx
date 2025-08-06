@@ -2,7 +2,7 @@
 import { useState } from 'react';
 
 interface TimeframeSelectorProps {
-  onChange: (timeframe: string) => void;
+  readonly onChange: (timeframe: string) => void;
 }
 
 export default function TimeframeSelector({ onChange }: TimeframeSelectorProps) {

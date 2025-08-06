@@ -29,7 +29,7 @@ export interface SignalData {
   news: NewsItem[];
 }
 
-interface Props { signal: SignalData; }
+interface Props { readonly signal: SignalData; }
 
 export default function SignalDetailClient({ signal }: Props) {
   const [timeframe, setTimeframe] = useState(signal.timeframe);

@@ -14,7 +14,7 @@ type Signal = {
 };
 
 interface SignalsTableProps {
-  signals: Signal[];
+  readonly signals: Signal[];
 }
 
 export default function SignalsTable({ signals }: SignalsTableProps) {

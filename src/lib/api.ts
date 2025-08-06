@@ -45,11 +45,16 @@ export async function getForexPrice(pair: string) {
 
 export async function getNews() {
   const parser = new Parser();
-  const feed = await parser.parseURL('https://cryptonews.com/news/feed.rss');
-  return feed.items.map(item => ({
-    title: item.title,
-    url: item.link,
-    description: item.contentSnippet ?? item.content ?? '',
-    publishedAt: item.pubDate,
-  }));
+  try {
+    const feed = await parser.parseURL('https://cryptonews.com/news/feed.rss');
+    return feed.items.map(item => ({
+      title: item.title,
+      url: item.link,
+      description: item.contentSnippet ?? item.content ?? '',
+      publishedAt: item.pubDate,
+    }));
+  } catch (error) {
+    console.error('Error fetching news RSS feed:', error);
+    return [];
+  }
 }

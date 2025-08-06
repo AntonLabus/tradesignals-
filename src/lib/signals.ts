@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { RSI, SMA } from 'technicalindicators';
-import { getCryptoPrice, getForexPrice } from './api';
+import { getCryptoPrice, getForexPrice, getNews } from './api';
 
 /**
  * Fetches historical close prices and computes a trading signal
@@ -55,7 +55,6 @@ export async function calculateSignal(pair: string, timeframe: string = '1d') {
     : await getForexPrice(pair);
 
   // Fetch news items for explanation
-  const { getNews } = await import('./api');
   let articles: Array<any> = [];
   try {
     articles = await getNews();

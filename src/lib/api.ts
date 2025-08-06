@@ -1,4 +1,5 @@
 import axios from 'axios';
+import Parser from 'rss-parser';
 
 export async function getCryptoPrice(pair: string) {
   // Convert pair like 'BTC/USD' to CoinGecko ID 'bitcoin'
@@ -26,23 +27,12 @@ export async function getForexPrice(pair: string) {
 }
 
 export async function getNews() {
-  const key = process.env.NEWSAPI_KEY;
-  if (key) {
-    // Use NewsAPI if key is provided
-    const res = await axios.get('https://newsapi.org/v2/top-headlines', {
-      params: { category: 'business', apiKey: key }
-    });
-    return res.data.articles;
-  }
-  // Fallback to RSS feed via rss2json.com (no API key required)
-  const rssRes = await axios.get('https://api.rss2json.com/v1/api.json', {
-    params: { rss_url: 'https://cryptonews.com/news/feed.rss' }
-  });
-  // Map RSS items to a common format
-  return rssRes.data.items.map((item: any) => ({
+  const parser = new Parser();
+  const feed = await parser.parseURL('https://cryptonews.com/news/feed.rss');
+  return feed.items.map(item => ({
     title: item.title,
     url: item.link,
-    description: item.description,
-    publishedAt: item.pubDate
+    description: item.contentSnippet ?? item.content ?? '',
+    publishedAt: item.pubDate,
   }));
 }

@@ -14,10 +14,12 @@ export async function generateMetadata({ params }: {
   };
 }
 
-export default async function SignalDetailPage({ params, searchParams }: { 
-  params: Promise<{ pair: string }>; 
-  searchParams?: Promise<{ timeframe?: string }>; 
-}) {
+interface SignalDetailPageProps {
+  readonly params: Promise<{ readonly pair: string }>;
+  readonly searchParams?: Promise<{ readonly timeframe?: string }>;
+}
+
+export default async function SignalDetailPage({ params, searchParams }: SignalDetailPageProps) {
   const resolvedParams = await params;
   const resolvedSearchParams = await searchParams;
   const pair = decodeURIComponent(resolvedParams.pair);

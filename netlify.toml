@@ -4,6 +4,7 @@
 
 [build.environment]
   NODE_VERSION = "18.18.0"
+  ALPHA_VANTAGE_API_KEY = "$ALPHA_VANTAGE_API_KEY"
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"

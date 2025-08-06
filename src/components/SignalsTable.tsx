@@ -1,6 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
-// import SparklineTVChart from './SparklineTVChart';
+import SparklineTVChart from './SparklineTVChart';
 
 // Type for a trading signal row
 interface Signal {
@@ -36,10 +36,7 @@ const SignalsTable = ({ filtered }: SignalsTableProps) => {
         {filtered.map((signal: Signal) => (
           <tr key={signal.pair} className="block md:table-row">
             <td className="border px-4 py-2">
-              {/* Temporarily disabled TradingView chart */}
-              <div className="w-[120px] h-[60px] bg-gray-200 flex items-center justify-center text-xs">
-                Chart
-              </div>
+              <SparklineTVChart pair={signal.pair} timeframe={signal.timeframe} />
             </td>
             <td className="border px-4 py-2">
               <Link

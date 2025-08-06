@@ -3,78 +3,188 @@ import { RSI, SMA } from 'technicalindicators';
 import { getCryptoPrice, getForexPrice, getNews } from './api';
 
 /**
- * Fetches historical close prices and computes a trading signal
+ * Check if a trading pair is a cryptocurrency
  */
-export async function calculateSignal(pair: string, timeframe: string = '1d') {
-  const isCrypto = (pair: string) => /USDT$|USD$/.exec(pair) !== null;
+const isCrypto = (pair: string): boolean => /USDT$|USD$/.exec(pair) !== null;
 
-  // Fetch historical data - temporarily using mock data for debugging
-  console.log('Calculating signal for:', pair, 'timeframe:', timeframe);
-  let closes: number[] = [];
+/**
+ * Generate fallback mock data when API calls fail
+ */
+const generateFallbackData = (pair: string): number[] => {
+  const basePrice = isCrypto(pair) ? 50000 : 1.1;
+  const variance = isCrypto(pair) ? 1000 : 0.1;
+  return Array.from({length: 30}, () => basePrice + Math.random() * variance);
+};
+
+/**
+ * Fetch historical crypto prices from CoinGecko
+ */
+async function fetchCryptoHistoricalData(pair: string): Promise<number[]> {
+  const id = pair.split('/')[0].toLowerCase();
+  console.log('Fetching crypto data for:', id);
   
-  try {
-    if (isCrypto(pair)) {
-      const id = pair.split('/')[0].toLowerCase();
-      console.log('Fetching crypto data for:', id);
-      // Use mock data for now to avoid API issues
-      closes = Array.from({length: 30}, (_, i) => 50000 + Math.random() * 1000);
-    } else {
-      console.log('Fetching forex data for:', pair);
-      // Use mock data for now to avoid API issues
-      closes = Array.from({length: 30}, (_, i) => 1.1 + Math.random() * 0.1);
+  const response = await axios.get(`https://api.coingecko.com/api/v3/coins/${id}/market_chart`, {
+    params: {
+      vs_currency: 'usd',
+      days: '30',
+      interval: 'daily'
     }
+  });
+  
+  if (!response.data?.prices) {
+    throw new Error('No price data received from CoinGecko');
+  }
+  
+  return response.data.prices.map((p: [number, number]) => p[1]);
+}
+
+/**
+ * Fetch historical forex data from Alpha Vantage
+ */
+async function fetchForexHistoricalData(pair: string): Promise<number[]> {
+  console.log('Fetching forex data for:', pair);
+  
+  const alphaPair = pair.replace('/', '');
+  const response = await axios.get('https://www.alphavantage.co/query', {
+    params: {
+      function: 'FX_DAILY',
+      from_symbol: alphaPair.slice(0, 3),
+      to_symbol: alphaPair.slice(3),
+      apikey: process.env.ALPHA_VANTAGE_API_KEY || '',
+      outputsize: 'compact'
+    }
+  });
+  
+  if (!response.data?.['Time Series (FX)']) {
+    throw new Error('No forex data received from Alpha Vantage');
+  }
+  
+  const timeSeries = response.data['Time Series (FX)'];
+  return Object.values(timeSeries)
+    .slice(0, 30)
+    .map((day: any) => parseFloat(day['4. close']));
+}
+
+/**
+ * Fetch historical price data for a trading pair
+ */
+async function fetchHistoricalData(pair: string): Promise<number[]> {
+  try {
+    return isCrypto(pair) 
+      ? await fetchCryptoHistoricalData(pair)
+      : await fetchForexHistoricalData(pair);
   } catch (error) {
     console.error('Error in historical data fetch:', error);
-    closes = Array.from({length: 30}, (_, i) => 100 + Math.random() * 10);
+    return generateFallbackData(pair);
   }
+}
 
-  // Compute indicators
+/**
+ * Calculate technical indicators from price data
+ */
+function calculateIndicators(closes: number[]) {
   const rsiValues = RSI.calculate({ values: closes, period: 14 });
   const smaValues = SMA.calculate({ values: closes, period: 50 });
   const lastClose = closes[closes.length - 1];
   const lastRSI = rsiValues[rsiValues.length - 1] || 50;
   const lastSMA = smaValues[smaValues.length - 1] || lastClose;
+  
+  return { lastClose, lastRSI, lastSMA };
+}
 
-  // Determine signal type
-  let type: 'Buy' | 'Sell' | 'Hold' = 'Hold';
-  if (lastClose > lastSMA && lastRSI < 30) type = 'Buy';
-  else if (lastClose < lastSMA && lastRSI > 70) type = 'Sell';
+/**
+ * Determine signal type based on technical indicators
+ */
+function determineSignalType(lastClose: number, lastSMA: number, lastRSI: number): 'Buy' | 'Sell' | 'Hold' {
+  if (lastClose > lastSMA && lastRSI < 30) return 'Buy';
+  if (lastClose < lastSMA && lastRSI > 70) return 'Sell';
+  return 'Hold';
+}
 
-  // Confidence as distance from neutral 50
-  const confidence = Math.round(Math.max(0, 100 - Math.abs(50 - lastRSI)));
+/**
+ * Calculate confidence score based on RSI
+ */
+const calculateConfidence = (lastRSI: number): number => 
+  Math.round(Math.max(0, 100 - Math.abs(50 - lastRSI)));
 
-  // Fetch current price for levels - temporarily using mock data
-  let price = 1.0;
+/**
+ * Fetch current price for a trading pair
+ */
+async function fetchCurrentPrice(pair: string, fallbackPrice: number): Promise<number> {
   try {
     console.log('Fetching current price for:', pair);
+    
     if (isCrypto(pair)) {
-      price = 50000 + Math.random() * 1000; // Mock crypto price
+      const priceData = await getCryptoPrice(pair);
+      return priceData.price;
     } else {
-      price = 1.1 + Math.random() * 0.1; // Mock forex price
+      const priceData = await getForexPrice(pair);
+      return priceData.price;
     }
   } catch (error) {
     console.error('Error fetching current price:', error);
-    price = lastClose;
+    return fallbackPrice;
   }
+}
 
-  // Fetch news items for explanation
-  let articles: Array<any> = [];
+/**
+ * Generate explanation text for the trading signal
+ */
+function generateExplanation(
+  type: 'Buy' | 'Sell' | 'Hold',
+  lastClose: number,
+  lastSMA: number,
+  lastRSI: number
+): string {
+  if (type === 'Buy') {
+    return `Price ${lastClose.toFixed(2)} > SMA50 ${lastSMA.toFixed(2)} and RSI ${lastRSI.toFixed(0)} < 30 triggered Buy.`;
+  }
+  
+  if (type === 'Sell') {
+    return `Price ${lastClose.toFixed(2)} < SMA50 ${lastSMA.toFixed(2)} and RSI ${lastRSI.toFixed(0)} > 70 triggered Sell.`;
+  }
+  
+  return `Conditions not met for Buy/Sell; RSI ${lastRSI.toFixed(0)} is neutral near 50, so Hold.`;
+}
+
+/**
+ * Fetch news articles with error handling
+ */
+async function fetchNewsArticles(): Promise<Array<{title: string, url: string}>> {
   try {
-    articles = await getNews();
+    const articles = await getNews();
+    return articles.slice(0, 3).map((a: any) => ({ title: a.title, url: a.url }));
   } catch (error) {
     console.error('Error fetching news:', error);
-    articles = [];
+    return [];
   }
-  const news = articles.slice(0, 3).map((a: any) => ({ title: a.title, url: a.url }));
-  // Build plain-English explanation of the rule
-  let explanation: string;
-  if (type === 'Buy') {
-    explanation = `Price ${lastClose.toFixed(2)} > SMA50 ${lastSMA.toFixed(2)} and RSI ${lastRSI.toFixed(0)} < 30 triggered Buy.`;
-  } else if (type === 'Sell') {
-    explanation = `Price ${lastClose.toFixed(2)} < SMA50 ${lastSMA.toFixed(2)} and RSI ${lastRSI.toFixed(0)} > 70 triggered Sell.`;
-  } else {
-    explanation = `Conditions not met for Buy/Sell; RSI ${lastRSI.toFixed(0)} is neutral near 50, so Hold.`;
-  }
+}
+
+/**
+ * Fetches historical close prices and computes a trading signal
+ */
+export async function calculateSignal(pair: string, timeframe: string = '1d') {
+  console.log('Calculating signal for:', pair, 'timeframe:', timeframe);
+  
+  // Fetch historical data
+  const closes = await fetchHistoricalData(pair);
+  
+  // Calculate technical indicators
+  const { lastClose, lastRSI, lastSMA } = calculateIndicators(closes);
+  
+  // Determine signal type and confidence
+  const type = determineSignalType(lastClose, lastSMA, lastRSI);
+  const confidence = calculateConfidence(lastRSI);
+  
+  // Fetch current price for levels
+  const price = await fetchCurrentPrice(pair, lastClose);
+  
+  // Fetch news articles
+  const news = await fetchNewsArticles();
+  
+  // Generate explanation
+  const explanation = generateExplanation(type, lastClose, lastSMA, lastRSI);
+
   return {
     pair,
     assetClass: isCrypto(pair) ? 'Crypto' as const : 'Forex' as const,

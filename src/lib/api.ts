@@ -21,6 +21,7 @@ export async function getCryptoPrice(pair: string) {
 
 export async function getForexPrice(pair: string) {
   const key = process.env.ALPHA_VANTAGE_API_KEY;
+  console.log('AlphaVantage key present:', !!key, 'for pair:', pair);
   if (!key) {
     console.warn('⚠ Missing ALPHA_VANTAGE_API_KEY, defaulting price to 0');
     return { price: 0 };

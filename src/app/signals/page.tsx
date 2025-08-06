@@ -21,14 +21,15 @@ export const metadata: Metadata = {
 
 // Replace mock data with live fetch logic
 interface SignalsPageProps {
-  readonly searchParams?: { readonly timeframe?: string };
+  readonly searchParams?: Promise<{ readonly timeframe?: string }>;
 }
 export default async function SignalsPage({ searchParams }: SignalsPageProps) {
   // Define the pairs to display
   const pairs = ['EUR/USD', 'USD/JPY', 'BTC/USD', 'ETH/USD'];
 
   // Determine timeframe from URL (default to 1H)
-  const timeframe = searchParams?.timeframe ?? '1H';
+  const resolvedSearchParams = await searchParams;
+  const timeframe = resolvedSearchParams?.timeframe ?? '1H';
   // Calculate signals using full trading rules engine
   const signals = await Promise.all(
     pairs.map(pair => calculateSignal(pair, timeframe))

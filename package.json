@@ -25,12 +25,11 @@
   },
   "devDependencies": {
     "@babel/core": "^7.28.0",
-    "@types/react-dom": "^18.2.7",
-    "@babel/preset-typescript": "^7.27.1",
     "@testing-library/jest-dom": "^6.6.4",
     "@testing-library/react": "^14.0.0",
     "@types/jest": "^30.0.0",
     "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.7",
     "autoprefixer": "^10.4.21",
     "babel-jest": "^30.0.5",
     "eslint": "latest",
@@ -41,6 +40,8 @@
     "postcss": "^8.5.6",
     "tailwindcss": "^3.3.3",
     "ts-jest": "^29.4.1",
-    "typescript": "latest"
+    "typescript": "latest",
+    "@babel/preset-typescript": "^7.27.1",
+    "@babel/preset-react": "^7.28.0"
   }
 }

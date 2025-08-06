@@ -32,7 +32,26 @@ export default async function SignalsPage({ searchParams }: SignalsPageProps) {
   const timeframe = resolvedSearchParams?.timeframe ?? '1H';
   // Calculate signals using full trading rules engine
   const signals = await Promise.all(
-    pairs.map(pair => calculateSignal(pair, timeframe))
+    pairs.map(async pair => {
+      try {
+        return await calculateSignal(pair, timeframe);
+      } catch (error) {
+        console.error('Error calculating signal for', pair, error);
+        // Fallback signal to prevent crash
+        return {
+          pair,
+          assetClass: /USDT$|USD$/.exec(pair) ? 'Crypto' : 'Forex',
+          type: 'Hold' as const,
+          confidence: 0,
+          timeframe,
+          buyLevel: 0,
+          stopLoss: 0,
+          takeProfit: 0,
+          explanation: 'Error fetching data',
+          news: []
+        };
+      }
+    })
   );
 
   return (

@@ -8,3 +8,6 @@
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
+
+[functions.environment]
+  ALPHA_VANTAGE_API_KEY = "$ALPHA_VANTAGE_API_KEY"

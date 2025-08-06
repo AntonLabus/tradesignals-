@@ -56,7 +56,13 @@ export async function calculateSignal(pair: string, timeframe: string = '1d') {
 
   // Fetch news items for explanation
   const { getNews } = await import('./api');
-  const articles = await getNews();
+  let articles: Array<any> = [];
+  try {
+    articles = await getNews();
+  } catch (error) {
+    console.error('Error fetching news:', error);
+    articles = [];
+  }
   const news = articles.slice(0, 3).map((a: any) => ({ title: a.title, url: a.url }));
   // Build plain-English explanation of the rule
   let explanation: string;

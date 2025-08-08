@@ -1,4 +1,8 @@
 import axios from 'axios';
+// Set sane axios defaults to avoid long hangs that can abort streamed responses
+axios.defaults.timeout = 8000; // 8s per request cap
+axios.defaults.maxRedirects = 0;
+
 import { RSI, SMA, MACD, EMA, ATR } from 'technicalindicators';
 // Removed unused direct imports; fetchCurrentPrice will import lazily below
 import { fetchFundamentalData } from './fundamentals';

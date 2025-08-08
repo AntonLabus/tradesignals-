@@ -7,6 +7,8 @@ export const metadata: Metadata = {
   description: 'Current active trading signals for Forex and Crypto pairs',
 };
 
+export const dynamic = 'force-dynamic';
+
 // Client fetch version
 export default async function SignalsPage() {
   return (

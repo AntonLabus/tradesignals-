@@ -14,8 +14,10 @@ export default async function SignalsPage() {
   return (
     <div className="space-y-6">
       <TimeframeSelectorClient />
-      <h1 className="text-3xl font-bold">Active Signals</h1>
-      <SignalsTable signals={[]} />
+      <h1 className="text-3xl font-bold tracking-tight">Active Signals</h1>
+      <div className="glass p-2">
+        <SignalsTable signals={[]} />
+      </div>
     </div>
   );
 }

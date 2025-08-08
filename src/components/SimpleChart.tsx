@@ -47,27 +47,45 @@ export default function SimpleChart(props: Readonly<SimpleChartProps>) {
       .join(' ');
   }, [data, min, range]);
 
-  let color = '#6B7280'; // default hold/neutral
-  if (signalType === 'Buy') {
-    color = '#10B981';
-  } else if (signalType === 'Sell') {
-    color = '#EF4444';
-  }
+  let gradientId = 'grad-neutral';
+  if (signalType === 'Buy') gradientId = 'grad-buy';
+  if (signalType === 'Sell') gradientId = 'grad-sell';
 
   return (
-    <div className="w-[120px] h-[60px] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded p-1 flex flex-col">
+    <div className="w-[120px] h-[60px] glass p-1 flex flex-col">
       <div className="flex-1 flex items-center justify-center">
         <svg width="100" height="40" viewBox="0 0 100 40">
-          <path d={pathD} stroke={color} strokeWidth="1.5" fill="none" />
+          <defs>
+            <linearGradient id="grad-buy" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="#22E1FF" />
+              <stop offset="100%" stopColor="#B6FF2E" />
+            </linearGradient>
+            <linearGradient id="grad-sell" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="#FF4D8D" />
+              <stop offset="100%" stopColor="#A12FFF" />
+            </linearGradient>
+            <linearGradient id="grad-neutral" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="#94A3B8" />
+              <stop offset="100%" stopColor="#CBD5E1" />
+            </linearGradient>
+            <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="1.5" result="coloredBlur" />
+              <feMerge>
+                <feMergeNode in="coloredBlur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+          </defs>
+          <path d={pathD} stroke={`url(#${gradientId})`} strokeWidth="1.6" fill="none" filter="url(#glow)" />
           <circle
             cx={100 - 10}
             cy={40 - ((data[data.length - 1] - min) / range) * 40}
-            r={1.6}
-            fill={color}
+            r={1.8}
+            fill={`url(#${gradientId})`}
           />
         </svg>
       </div>
-      <div className="text-[8px] text-center text-gray-600 dark:text-gray-300 font-medium truncate" title={pair}>
+      <div className="text-[8px] text-center text-gray-300 font-medium truncate" title={pair}>
         {signalType} {confidence}%
       </div>
     </div>

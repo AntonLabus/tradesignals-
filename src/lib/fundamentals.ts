@@ -26,74 +26,71 @@ function computeHeadlineSentiment(titles: string[]): { raw: number; normalized: 
   return { raw: score, normalized, descriptor };
 }
 
-let fundamentalsCache: { ts: number; data: Omit<FundamentalData, 'score' | 'factors' | 'news'> & { baseScore: number; articles: any[]; macroNews: any[]; globalCrypto: any; fng: any; sentiment: { normalized: number; descriptor: string } } } | null = null;
+// Simplified cache structure storing only external data (pair specific base score recomputed each call)
+let fundamentalsCache: { ts: number; articles: any[]; macroNews: any[]; globalCrypto: any; fng: any; sentiment: { normalized: number; descriptor: string } } | null = null;
+
+// --- Helper functions to reduce cognitive complexity ---
+function baseScoreForPair(pair: string): number {
+  return /USD/.test(pair) ? 60 : 50;
+}
+
+function computeAdjustments(baseScore: number, pair: string, articles: any[], macroNews: any[], globalCrypto: any, fng: any, sentiment: { normalized: number; descriptor: string }) {
+  const top = articles.slice(0, 8).map((a: any) => ({ title: a.title, url: a.url }));
+  const buzzBoost = Math.min(15, top.length * 1.8);
+  const macroBoost = Math.min(10, macroNews.length * 0.8);
+  const dominanceAdj = globalCrypto?.btcDominance != null ? ((60 - globalCrypto.btcDominance) / 12) : 0;
+  const fngAdj = fng?.value != null ? (fng.value - 50) / 6 : 0;
+  const sentimentAdj = (sentiment?.normalized ?? 0) * 10;
+  const rawScore = baseScore + buzzBoost + macroBoost + dominanceAdj + fngAdj + sentimentAdj;
+  const score = Math.max(0, Math.min(100, rawScore));
+  const factors = [
+    `Headlines ${top.length}`,
+    macroNews.length ? `Macro feeds ${macroNews.length}` : 'Low macro flow',
+    fng?.value != null ? `Fear & Greed ${fng.value} (${fng.classification})` : 'No FNG',
+    globalCrypto?.btcDominance != null ? `BTC Dom ${globalCrypto.btcDominance.toFixed(1)}%` : 'No dominance',
+    `Sentiment ${sentiment?.descriptor ?? 'Neutral'}`,
+    /USD/.test(pair) ? 'USD macro relevance' : 'Crypto sentiment baseline',
+  ];
+  return { score, factors, news: top, sentimentScore: sentiment?.normalized ?? 0 };
+}
+
+function buildResult(baseScore: number, pair: string, cacheData: { articles: any[]; macroNews: any[]; globalCrypto: any; fng: any; sentiment: { normalized: number; descriptor: string } }): FundamentalData {
+  return computeAdjustments(baseScore, pair, cacheData.articles, cacheData.macroNews, cacheData.globalCrypto, cacheData.fng, cacheData.sentiment);
+}
+
+async function fetchExternalData(now: number): Promise<{ articles: any[]; macroNews: any[]; globalCrypto: any; fng: any; sentiment: { normalized: number; descriptor: string } }> {
+  const [articles, fng, globalCrypto, macroNews] = await Promise.all([
+    withTimeout(getNews(), 2500, () => []),
+    withTimeout(getFearGreed(), 2500, () => ({ value: null, classification: null })),
+    withTimeout(getGlobalCrypto(), 2500, () => ({ btcDominance: null, activeCryptos: null, marketCapChange24h: null })),
+    withTimeout(getMacroNews(), 2500, () => [])
+  ]);
+  const titles = articles.slice(0, 8).map((a: any) => a.title).filter(Boolean) as string[];
+  const sentiment = computeHeadlineSentiment(titles);
+  fundamentalsCache = { ts: now, articles, macroNews, globalCrypto, fng, sentiment };
+  return { articles, macroNews, globalCrypto, fng, sentiment };
+}
 
 // Placeholder economic + fundamental scoring. In real implementation integrate
 // economic calendar (rates, CPI, NFP) & company / macro feeds.
 export async function fetchFundamentalData(pair: string): Promise<FundamentalData> {
-  const baseScore = /USD/.test(pair) ? 60 : 50;
   const now = Date.now();
+  const baseScore = baseScoreForPair(pair);
   const TTL = 5 * 60 * 1000; // 5 minutes
+
+  // Try cache
   if (fundamentalsCache && now - fundamentalsCache.ts < TTL) {
-    // Reuse cached external data; recompute pair-dependent base adjustment
     try {
-      const { articles, macroNews, globalCrypto, fng, sentiment } = fundamentalsCache.data;
-      const top = articles.slice(0, 8).map((a: any) => ({ title: a.title, url: a.url }));
-      const buzzBoost = Math.min(15, top.length * 1.8);
-      const macroBoost = Math.min(10, macroNews.length * 0.8);
-      const dominanceAdj = globalCrypto.btcDominance != null ? ((60 - globalCrypto.btcDominance) / 12) : 0;
-      const fngAdj = fng.value != null ? (fng.value - 50) / 6 : 0;
-      const sentimentAdj = sentiment.normalized * 10;
-      const rawScore = baseScore + buzzBoost + macroBoost + dominanceAdj + fngAdj + sentimentAdj;
-      const score = Math.max(0, Math.min(100, rawScore));
-      return {
-        score,
-        sentimentScore: sentiment.normalized,
-        factors: [
-          `Headlines ${top.length}`,
-          macroNews.length ? `Macro feeds ${macroNews.length}` : 'Low macro flow',
-          fng.value != null ? `Fear & Greed ${fng.value} (${fng.classification})` : 'No FNG',
-          globalCrypto.btcDominance != null ? `BTC Dom ${globalCrypto.btcDominance.toFixed(1)}%` : 'No dominance',
-          `Sentiment ${sentiment.descriptor}`,
-          /USD/.test(pair) ? 'USD macro relevance' : 'Crypto sentiment baseline',
-        ],
-        news: top,
-      };
+      return buildResult(baseScore, pair, fundamentalsCache);
     } catch (e) {
       console.warn('fundamentals cache reuse failed', e instanceof Error ? e.message : e);
     }
   }
+
+  // Fetch fresh external data
   try {
-    const [articles, fng, globalCrypto, macroNews] = await Promise.all([
-      withTimeout(getNews(), 2500, () => []),
-      withTimeout(getFearGreed(), 2500, () => ({ value: null, classification: null })),
-      withTimeout(getGlobalCrypto(), 2500, () => ({ btcDominance: null, activeCryptos: null, marketCapChange24h: null })),
-      withTimeout(getMacroNews(), 2500, () => [])
-    ]);
-    const top = articles.slice(0, 8).map((a: any) => ({ title: a.title, url: a.url }));
-    const titles = top.map(t => t.title).filter(Boolean);
-    const sentiment = computeHeadlineSentiment(titles as string[]);
-    fundamentalsCache = { ts: now, data: { baseScore, articles, macroNews, globalCrypto, fng, sentiment } };
-    const sentimentAdj = sentiment.normalized * 10; // scale to -10..+10
-    const buzzBoost = Math.min(15, top.length * 1.8);
-    const macroBoost = Math.min(10, macroNews.length * 0.8);
-    const dominanceAdj = globalCrypto.btcDominance != null ? ((60 - globalCrypto.btcDominance) / 12) : 0; // moderate weighting
-    const fngAdj = fng.value != null ? (fng.value - 50) / 6 : 0;
-    const rawScore = baseScore + buzzBoost + macroBoost + dominanceAdj + fngAdj + sentimentAdj;
-    const score = Math.max(0, Math.min(100, rawScore));
-    return {
-      score,
-      sentimentScore: sentiment.normalized,
-      factors: [
-        `Headlines ${top.length}`,
-        macroNews.length ? `Macro feeds ${macroNews.length}` : 'Low macro flow',
-        fng.value != null ? `Fear & Greed ${fng.value} (${fng.classification})` : 'No FNG',
-        globalCrypto.btcDominance != null ? `BTC Dom ${globalCrypto.btcDominance.toFixed(1)}%` : 'No dominance',
-        `Sentiment ${sentiment.descriptor}`,
-        /USD/.test(pair) ? 'USD macro relevance' : 'Crypto sentiment baseline',
-      ],
-      news: top,
-    };
+    const ext = await fetchExternalData(now);
+    return buildResult(baseScore, pair, ext);
   } catch (e) {
     console.warn('fetchFundamentalData failed', e instanceof Error ? e.message : e);
     return { score: baseScore, factors: ['Fundamental aggregation failed'], news: [] };

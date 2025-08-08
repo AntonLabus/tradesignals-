@@ -5,7 +5,19 @@ import SimpleChart from '../../components/SimpleChart';
 import type { FullSignalResult } from '../../lib/signals';
 
 // Narrow subset type (reuse interface)
-interface SignalsTableProps { readonly signals: FullSignalResult[]; }
+interface SignalsTableProps {
+  readonly signals: FullSignalResult[];
+  readonly showInlineFilters?: boolean;
+  readonly externalFilters?: {
+    assetFilter: 'All' | 'Forex' | 'Crypto';
+    setAssetFilter: (v: 'All' | 'Forex' | 'Crypto') => void;
+    typeFilter: 'All' | 'Buy' | 'Sell' | 'Hold';
+    setTypeFilter: (v: 'All' | 'Buy' | 'Sell' | 'Hold') => void;
+    timeframeFilter: string;
+    setTimeframeFilter: (v: string) => void;
+  };
+  readonly onSignalsUpdate?: (signals: FullSignalResult[]) => void;
+}
 
 function badgeColor(type: string) {
   if (type === 'Buy') return 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300';
@@ -21,13 +33,22 @@ function riskColor(risk?: string) {
   }
 }
 
-export default function SignalsTable({ signals: initial }: SignalsTableProps) {
+export default function SignalsTable({ signals: initial, showInlineFilters = true, externalFilters, onSignalsUpdate }: SignalsTableProps) {
   const [signals, setSignals] = useState<FullSignalResult[]>(initial);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [assetFilter, setAssetFilter] = useState<'All' | 'Forex' | 'Crypto'>('All');
-  const [typeFilter, setTypeFilter] = useState<'All' | 'Buy' | 'Sell' | 'Hold'>('All');
-  const [timeframeFilter, setTimeframeFilter] = useState<string>('All');
+
+  // filters (controlled or uncontrolled)
+  const [assetFilterInternal, setAssetFilterInternal] = useState<'All' | 'Forex' | 'Crypto'>(externalFilters?.assetFilter ?? 'All');
+  const [typeFilterInternal, setTypeFilterInternal] = useState<'All' | 'Buy' | 'Sell' | 'Hold'>(externalFilters?.typeFilter ?? 'All');
+  const [timeframeFilterInternal, setTimeframeFilterInternal] = useState<string>(externalFilters?.timeframeFilter ?? 'All');
+
+  const assetFilter = externalFilters?.assetFilter ?? assetFilterInternal;
+  const setAssetFilter = externalFilters?.setAssetFilter ?? setAssetFilterInternal;
+  const typeFilter = externalFilters?.typeFilter ?? typeFilterInternal;
+  const setTypeFilter = externalFilters?.setTypeFilter ?? setTypeFilterInternal;
+  const timeframeFilter = externalFilters?.timeframeFilter ?? timeframeFilterInternal;
+  const setTimeframeFilter = externalFilters?.setTimeframeFilter ?? setTimeframeFilterInternal;
 
   useEffect(() => {
     let aborted = false;
@@ -37,7 +58,10 @@ export default function SignalsTable({ signals: initial }: SignalsTableProps) {
         const res = await fetch(`/api/signals`);
         if (!res.ok) throw new Error(`Status ${res.status}`);
         const json = await res.json();
-        if (!aborted) setSignals(json.signals);
+        if (!aborted) {
+          setSignals(json.signals);
+          onSignalsUpdate?.(json.signals);
+        }
       } catch (e: any) {
         if (!aborted) setError(e.message || 'Failed');
       } finally {
@@ -45,7 +69,7 @@ export default function SignalsTable({ signals: initial }: SignalsTableProps) {
       }
     })();
     return () => { aborted = true; };
-  }, []);
+  }, [onSignalsUpdate]);
 
   const timeframes = Array.from(new Set(signals.map((s) => s.timeframe)));
   const filtered = signals.filter(
@@ -55,37 +79,39 @@ export default function SignalsTable({ signals: initial }: SignalsTableProps) {
       (timeframeFilter === 'All' || s.timeframe === timeframeFilter)
   );
 
-  if (loading) return <div className="p-4 text-sm text-gray-600 dark:text-gray-300">Loading signals...</div>;
-  if (error) return <div className="p-4 text-sm text-red-600">Error: {error}</div>;
+  if (loading) return <div className="p-4 text-sm text-gray-300">Loading signals...</div>;
+  if (error) return <div className="p-4 text-sm text-rose-400">Error: {error}</div>;
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-4 mb-4">
-        <div>
-          <label htmlFor="assetFilter" className="block text-sm font-medium">Asset Class</label>
-          <select id="assetFilter" className="border rounded p-1 bg-white dark:bg-gray-800" value={assetFilter} onChange={(e) => setAssetFilter(e.target.value as any)}>
-            <option value="All">All</option>
-            <option value="Forex">Forex</option>
-            <option value="Crypto">Crypto</option>
-          </select>
+      {showInlineFilters && (
+        <div className="flex flex-wrap gap-4 mb-4">
+          <div>
+            <label htmlFor="assetFilter" className="block text-sm font-medium">Asset Class</label>
+            <select id="assetFilter" className="border rounded p-1 bg-white dark:bg-gray-800" value={assetFilter} onChange={(e) => setAssetFilter(e.target.value as any)}>
+              <option value="All">All</option>
+              <option value="Forex">Forex</option>
+              <option value="Crypto">Crypto</option>
+            </select>
+          </div>
+          <div>
+            <label htmlFor="typeFilter" className="block text-sm font-medium">Type</label>
+            <select id="typeFilter" className="border rounded p-1 bg-white dark:bg-gray-800" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as any)}>
+              <option value="All">All</option>
+              <option value="Buy">Buy</option>
+              <option value="Sell">Sell</option>
+              <option value="Hold">Hold</option>
+            </select>
+          </div>
+          <div>
+            <label htmlFor="timeframeFilter" className="block text-sm font-medium">Timeframe</label>
+            <select id="timeframeFilter" className="border rounded p-1 bg-white dark:bg-gray-800" value={timeframeFilter} onChange={(e) => setTimeframeFilter(e.target.value)}>
+              <option value="All">All</option>
+              {timeframes.map((tf) => (<option key={tf} value={tf}>{tf}</option>))}
+            </select>
+          </div>
         </div>
-        <div>
-          <label htmlFor="typeFilter" className="block text-sm font-medium">Type</label>
-          <select id="typeFilter" className="border rounded p-1 bg-white dark:bg-gray-800" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as any)}>
-            <option value="All">All</option>
-            <option value="Buy">Buy</option>
-            <option value="Sell">Sell</option>
-            <option value="Hold">Hold</option>
-          </select>
-        </div>
-        <div>
-          <label htmlFor="timeframeFilter" className="block text-sm font-medium">Timeframe</label>
-          <select id="timeframeFilter" className="border rounded p-1 bg-white dark:bg-gray-800" value={timeframeFilter} onChange={(e) => setTimeframeFilter(e.target.value)}>
-            <option value="All">All</option>
-            {timeframes.map((tf) => (<option key={tf} value={tf}>{tf}</option>))}
-          </select>
-        </div>
-      </div>
+      )}
       <div className="overflow-x-auto glass">
         <table className="min-w-full table-auto text-sm">
           <thead className="text-xs uppercase tracking-wide text-gray-300">

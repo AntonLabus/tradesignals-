@@ -5,7 +5,17 @@ import { calculateSignal } from '../../../lib/signals';
 const cache: Record<string, { ts: number; data: any }> = {};
 const TTL = 1000 * 60; // 1 minute per pair/timeframe
 
+// Helper to cap signal calculation time
+async function withTimeout<T>(p: Promise<T>, ms: number, fallback: () => T | Promise<T>): Promise<T> {
+  return new Promise<T>((resolve) => {
+    const to = setTimeout(async () => { resolve(await fallback()); }, ms);
+    p.then(v => { clearTimeout(to); resolve(v); }).catch(async () => { clearTimeout(to); resolve(await fallback()); });
+  });
+}
+
 export async function GET(req: Request) {
+  const start = Date.now();
+  const BUDGET = 8000; // 8s total budget for all pairs
   const { searchParams } = new URL(req.url);
   const pairsParam = searchParams.get('pairs') || 'EUR/USD,USD/JPY,GBP/USD,BTC/USD,ETH/USD';
   const timeframe = searchParams.get('timeframe') || '1H';
@@ -21,12 +31,17 @@ export async function GET(req: Request) {
     }
     try {
       // eslint-disable-next-line no-await-in-loop
-      const sig = await calculateSignal(pair, timeframe);
+      const sig = await withTimeout(
+        calculateSignal(pair, timeframe),
+        2500,
+        () => ({ pair, assetClass: /USD/.test(pair) ? 'Forex' : 'Crypto', type: 'Hold', confidence: 0, timeframe, buyLevel: 0, stopLoss: 0, takeProfit: 0, explanation: 'Timeout', news: [], indicators: { rsi: 0, sma50: 0, sma200: 0 }, fundamentals: { score: 0, factors: [] } })
+      );
       cache[key] = { ts: now, data: sig };
       results.push(sig);
     } catch (e) {
       results.push({ pair, assetClass: /USD/.test(pair) ? 'Forex' : 'Crypto', type: 'Hold', confidence: 0, timeframe, buyLevel: 0, stopLoss: 0, takeProfit: 0, explanation: 'Error', news: [], indicators: { rsi: 0, sma50: 0, sma200: 0 }, fundamentals: { score: 0, factors: [] } });
     }
+    if (Date.now() - start > BUDGET) break; // stop processing further pairs
   }
   return NextResponse.json({ signals: results });
 }

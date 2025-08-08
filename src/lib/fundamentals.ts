@@ -65,10 +65,10 @@ export async function fetchFundamentalData(pair: string): Promise<FundamentalDat
   }
   try {
     const [articles, fng, globalCrypto, macroNews] = await Promise.all([
-      getNews(),
-      getFearGreed(),
-      getGlobalCrypto(),
-      getMacroNews()
+      withTimeout(getNews(), 2500, () => []),
+      withTimeout(getFearGreed(), 2500, () => ({ value: null, classification: null })),
+      withTimeout(getGlobalCrypto(), 2500, () => ({ btcDominance: null, activeCryptos: null, marketCapChange24h: null })),
+      withTimeout(getMacroNews(), 2500, () => [])
     ]);
     const top = articles.slice(0, 8).map((a: any) => ({ title: a.title, url: a.url }));
     const titles = top.map(t => t.title).filter(Boolean);
@@ -98,4 +98,15 @@ export async function fetchFundamentalData(pair: string): Promise<FundamentalDat
     console.warn('fetchFundamentalData failed', e instanceof Error ? e.message : e);
     return { score: baseScore, factors: ['Fundamental aggregation failed'], news: [] };
   }
+}
+
+async function withTimeout<T>(p: Promise<T>, ms: number, fallback: () => T | Promise<T>): Promise<T> {
+  return new Promise<T>((resolve) => {
+    const to = setTimeout(async () => {
+      try { resolve(await fallback()); } catch { /* ignore */ }
+    }, ms);
+    p.then(v => { clearTimeout(to); resolve(v); }).catch(() => {
+      clearTimeout(to); (async()=>resolve(await fallback()))();
+    });
+  });
 }

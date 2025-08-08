@@ -93,12 +93,8 @@ export default function SignalsTable({ signals: initial }: SignalsTableProps) {
               <th className="px-4 py-2">Chart</th>
               <th className="px-4 py-2">Pair</th>
               <th className="px-4 py-2">Type</th>
-              <th className="px-4 py-2">Confidence</th>
-              <th className="px-4 py-2">Tech</th>
-              <th className="px-4 py-2">Fund</th>
-              <th className="px-4 py-2">Risk</th>
-              <th className="px-4 py-2">Vol%</th>
-              <th className="px-4 py-2">R/R</th>
+              <th className="px-4 py-2">Conf</th>
+              <th className="px-4 py-2">T/F</th>
               <th className="px-4 py-2">Timeframe</th>
               <th className="px-4 py-2">Levels</th>
             </tr>
@@ -109,40 +105,54 @@ export default function SignalsTable({ signals: initial }: SignalsTableProps) {
               if (sig.confidence > 70) confColor = 'bg-green-500';
               else if (sig.confidence > 40) confColor = 'bg-amber-500';
               else confColor = 'bg-red-500';
+
+              const tech = sig.technicalScore ?? undefined;
+              const fund = sig.fundamentals?.score ?? sig.fundamentalScore ?? undefined;
+              const tfTooltip = `Risk: ${sig.riskCategory ?? '—'} | Vol: ${sig.volatilityPct?.toFixed?.(2) ?? '—'}% | R/R: ${sig.riskReward?.toFixed?.(2) ?? '—'}`;
+
               return (
-                <tr key={sig.pair+sig.timeframe} className="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/40">
-                  <td className="px-4 py-2">
-                    <SimpleChart pair={sig.pair} signalType={sig.type} confidence={sig.confidence} history={sig.history} />
-                  </td>
-                  <td className="px-4 py-2 whitespace-nowrap">
-                    <Link href={`/signals/${encodeURIComponent(sig.pair)}`} className="text-blue-600 dark:text-blue-400 hover:underline font-medium">
-                      {sig.pair}
-                    </Link>
-                    <div className="text-[10px] text-gray-500">{sig.assetClass}</div>
-                  </td>
-                  <td className="px-4 py-2">
-                    <span className={`px-2 py-1 rounded text-xs font-semibold inline-block ${badgeColor(sig.type)}`}>{sig.type}</span>
-                  </td>
-                  <td className="px-4 py-2 w-32">
-                    <div className="w-full bg-gray-200 dark:bg-gray-700 h-2 rounded overflow-hidden" title={`${sig.confidence}%`}>
-                      <div className={`h-full ${confColor}`} style={{ width: `${sig.confidence}%` }} />
-                    </div>
-                    <div className="text-[10px] mt-1 text-gray-600 dark:text-gray-400 text-right">{sig.confidence}%</div>
-                  </td>
-                  <td className="px-4 py-2 text-center">{sig.technicalScore ?? '—'}</td>
-                  <td className="px-4 py-2 text-center">{sig.fundamentals?.score ?? sig.fundamentalScore ?? '—'}</td>
-                  <td className="px-4 py-2">
-                    <span className={`px-2 py-1 rounded text-xs font-semibold inline-block ${riskColor(sig.riskCategory)}`}>{sig.riskCategory ?? '—'}</span>
-                  </td>
-                  <td className="px-4 py-2 text-center">{sig.volatilityPct?.toFixed?.(2) ?? '—'}</td>
-                  <td className="px-4 py-2 text-center">{sig.riskReward?.toFixed?.(2) ?? '—'}</td>
-                  <td className="px-4 py-2 text-center">{sig.timeframe}</td>
-                  <td className="px-4 py-2 text-[11px]">
-                    <div><span className="font-semibold">B</span> {sig.buyLevel}</div>
-                    <div><span className="font-semibold text-rose-600">SL</span> {sig.stopLoss}</div>
-                    <div><span className="font-semibold text-green-600">TP</span> {sig.takeProfit}</div>
-                  </td>
-                </tr>
+                <React.Fragment key={sig.pair+sig.timeframe}>
+                  <tr className="hover:bg-gray-50 dark:hover:bg-gray-700/40 border-b-0" title={tfTooltip}>
+                    <td className="px-4 py-2">
+                      <SimpleChart pair={sig.pair} signalType={sig.type} confidence={sig.confidence} history={sig.history} />
+                    </td>
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      <Link href={`/signals/${encodeURIComponent(sig.pair)}`} className="text-blue-600 dark:text-blue-400 hover:underline font-medium">
+                        {sig.pair}
+                      </Link>
+                      <div className="text-[10px] text-gray-500">{sig.assetClass}</div>
+                    </td>
+                    <td className="px-4 py-2">
+                      <span className={`px-2 py-1 rounded text-xs font-semibold inline-block ${badgeColor(sig.type)}`}>{sig.type}</span>
+                    </td>
+                    <td className="px-4 py-2 w-28">
+                      <div className="w-full bg-gray-200 dark:bg-gray-700 h-2 rounded overflow-hidden" title={`${sig.confidence}%`}>
+                        <div className={`h-full ${confColor}`} style={{ width: `${sig.confidence}%` }} />
+                      </div>
+                      <div className="text-[10px] mt-1 text-gray-600 dark:text-gray-400 text-right">{sig.confidence}%</div>
+                    </td>
+                    <td className="px-4 py-2 text-center" title={tfTooltip}>
+                      {tech != null || fund != null ? (
+                        <div className="flex items-center justify-center gap-2 text-xs">
+                          <span className="inline-flex items-center gap-1"><span className="text-gray-500">T</span> {tech ?? '—'}</span>
+                          <span className="text-gray-300">/</span>
+                          <span className="inline-flex items-center gap-1"><span className="text-gray-500">F</span> {fund ?? '—'}</span>
+                        </div>
+                      ) : '—'}
+                    </td>
+                    <td className="px-4 py-2 text-center">{sig.timeframe}</td>
+                    <td className="px-4 py-2 text-[11px] whitespace-nowrap">
+                      <span className="font-semibold">B</span> {sig.buyLevel} <span className="text-gray-400">|</span> <span className="font-semibold text-rose-600">SL</span> {sig.stopLoss} <span className="text-gray-400">|</span> <span className="font-semibold text-green-600">TP</span> {sig.takeProfit}
+                    </td>
+                  </tr>
+                  <tr className="border-b border-gray-100 dark:border-gray-700">
+                    <td className="px-4 pb-3 text-[10px] text-gray-500 dark:text-gray-400" colSpan={7}>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-medium inline-block align-middle ${riskColor(sig.riskCategory)}`}>{sig.riskCategory ?? '—'}</span>
+                      <span className="ml-2 align-middle">Vol: {sig.volatilityPct?.toFixed?.(2) ?? '—'}%</span>
+                      <span className="ml-2 align-middle">R/R: {sig.riskReward?.toFixed?.(2) ?? '—'}</span>
+                    </td>
+                  </tr>
+                </React.Fragment>
               );
             })}
           </tbody>

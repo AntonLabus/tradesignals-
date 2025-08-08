@@ -3,6 +3,7 @@ import React, { ReactNode } from 'react';
 import Link from 'next/link';
 import NextThemesProvider from '../components/ThemeProvider';
 import type { Metadata } from 'next';
+import ThemeToggle from '../components/ThemeToggle';
 
 export const metadata: Metadata = {
   title: 'TradeSignals',
@@ -17,18 +18,23 @@ interface RootLayoutProps {
 export default function RootLayout({ children }: RootLayoutProps) {
   return (
     <html lang="en">
-      <body className="bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+      <body className="min-h-screen text-gray-100">
         <NextThemesProvider>
-          <header className="border-b border-gray-200 dark:border-gray-700 p-4 flex justify-between items-center">
-            <h1 className="text-xl font-bold">
-              <Link href="/">TradeSignals</Link>
-            </h1>
-            <nav className="flex items-center">
-              <Link href="/" className="mr-4">Home</Link>
-              <Link href="/signals">Signals</Link>
-            </nav>
+          <header className="sticky top-0 z-40 header-gradient/30 backdrop-blur supports-[backdrop-filter]:bg-white/5">
+            <div className="max-w-6xl mx-auto flex items-center justify-between px-6 py-4">
+              <div className="flex items-center gap-3">
+                <div className="w-2 h-2 rounded-full bg-neon-cyan shadow-neon animate-glow" />
+                <Link href="/" className="text-lg md:text-2xl font-bold tracking-tight">TradeSignals</Link>
+              </div>
+              <nav className="flex items-center gap-6 text-sm">
+                <Link href="/" className="hover:text-neon-cyan">Home</Link>
+                <Link href="/signals" className="hover:text-neon-violet">Signals</Link>
+                <ThemeToggle />
+              </nav>
+            </div>
+            <div className="neon-divider" />
           </header>
-          <main className="p-6 max-w-5xl mx-auto">{children}</main>
+          <main className="max-w-6xl mx-auto px-6 py-8 space-y-6">{children}</main>
         </NextThemesProvider>
       </body>
     </html>

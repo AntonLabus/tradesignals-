@@ -8,56 +8,46 @@ export const metadata: Metadata = {
 
 export default function HomePage() {
   return (
-    <div className="space-y-10">
+    <div className="space-y-12">
       {/* Hero */}
-      <section>
-        <h2 className="text-3xl font-bold">Welcome to TradeSignals</h2>
-        <p className="mt-2 text-lg">
-          Get real-time Buy, Sell, and Hold signals for major Forex and Crypto pairs, based on technical and fundamental analysis.
-        </p>
+      <section className="glass relative overflow-hidden">
+        <div className="absolute inset-0 bg-[radial-gradient(600px_200px_at_20%_-20%,rgba(34,225,255,0.12),transparent),radial-gradient(600px_200px_at_80%_-10%,rgba(161,47,255,0.12),transparent)] pointer-events-none" />
+        <div className="relative px-6 py-10 md:py-14">
+          <h2 className="text-3xl md:text-5xl font-extrabold tracking-tight">AI‑driven Signals for Forex & Crypto</h2>
+          <p className="mt-3 text-sm md:text-base text-gray-300 max-w-3xl">
+            Real-time Buy, Sell, Hold recommendations blending technical momentum and macro fundamentals. Built on free data and optimized for speed.
+          </p>
+          <div className="mt-6 flex flex-wrap gap-3">
+            <Link href="/signals" className="btn-primary">Open Signals Dashboard</Link>
+            <a href="#how" className="badge">How it works</a>
+          </div>
+        </div>
       </section>
-      {/* How it works */}
-      <section>
-        <h3 className="text-2xl font-semibold">How It Works</h3>
-        <ul className="list-disc list-inside mt-2 space-y-1">
-          <li>Fetch historical and live market data</li>
-          <li>Apply technical indicators: RSI, MACD, MAs</li>
-          <li>Incorporate relevant news and fundamentals</li>
-          <li>Compute confidence score and recommended levels</li>
-        </ul>
-      </section>
+
       {/* Feature grid */}
-      <section className="grid md:grid-cols-3 gap-6 mt-8">
-        <div className="p-4 rounded border dark:border-gray-700">
-          <h4 className="font-semibold mb-2">Multi-Timeframe</h4>
-          <p className="text-sm">Analyze signals across 1m to 1D with adaptive indicator settings.</p>
+      <section id="how" className="grid md:grid-cols-3 gap-6">
+        <div className="card">
+          <h4 className="font-semibold mb-1">Multi-Timeframe</h4>
+          <p className="text-sm text-gray-300">Analyze 1m → 1D with adaptive MACD/EMA settings and trend filters.</p>
         </div>
-        <div className="p-4 rounded border dark:border-gray-700">
-          <h4 className="font-semibold mb-2">Technical + Fundamental</h4>
-          <p className="text-sm">Blend RSI, MACD, MAs with news sentiment and macro context.</p>
+        <div className="card">
+          <h4 className="font-semibold mb-1">Technical + Fundamental</h4>
+          <p className="text-sm text-gray-300">Blend RSI, MACD, MAs with news sentiment and market regime signals.</p>
         </div>
-        <div className="p-4 rounded border dark:border-gray-700">
-          <h4 className="font-semibold mb-2">Actionable Levels</h4>
-          <p className="text-sm">Each signal includes buy, stop-loss and take-profit guidance.</p>
+        <div className="card">
+          <h4 className="font-semibold mb-1">Actionable Levels</h4>
+          <p className="text-sm text-gray-300">Each signal includes entry, stop-loss, and take-profit guidance.</p>
         </div>
       </section>
+
       {/* Roadmap */}
-      <section>
+      <section className="glass p-6">
         <h3 className="text-2xl font-semibold">Roadmap</h3>
-        <ul className="list-disc list-inside mt-2 space-y-1 text-sm">
-          <li>Deeper macro ingestion (rates, CPI releases)</li>
+        <ul className="list-disc list-inside mt-2 space-y-1 text-sm text-gray-300">
+          <li>Deeper macro ingestion (FOMC/ECB releases, CPI)</li>
           <li>Pattern recognition & volatility filters</li>
-          <li>User watchlists & alerts</li>
+          <li>Watchlists, alerts, and backtests</li>
         </ul>
-      </section>
-      {/* CTA */}
-      <section>
-        <Link
-          href="/signals"
-          className="inline-block mt-4 px-6 py-3 bg-blue-600 text-white rounded hover:bg-blue-700"
-        >
-          View Signals Dashboard
-        </Link>
       </section>
     </div>
   );

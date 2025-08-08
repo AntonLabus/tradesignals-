@@ -1,3 +1,39 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Futuristic background */
+:root {
+  --bg: #0b1220;
+}
+html, body {
+  background: radial-gradient(1200px 800px at 10% -10%, rgba(34,225,255,0.08), transparent 60%),
+              radial-gradient(1000px 700px at 110% 10%, rgba(161,47,255,0.08), transparent 60%),
+              linear-gradient(180deg, #0b1220 0%, #0a0f1a 100%);
+}
+
+/* Glass panels */
+.glass {
+  @apply bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl shadow-soft;
+}
+.neon-divider {
+  @apply h-px bg-gradient-to-r from-neon-cyan/60 via-neon-violet/60 to-neon-pink/60;
+}
+.btn-primary {
+  @apply relative inline-flex items-center justify-center px-5 py-2 rounded-xl text-white bg-gradient-to-r from-neon-cyan via-neon-violet to-neon-pink shadow-neon transition-transform hover:scale-[1.02];
+}
+.card {
+  @apply glass p-5 hover:shadow-neon transition-shadow;
+}
+.badge {
+  @apply inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border border-white/10 bg-white/5;
+}
+.header-gradient {
+  background: linear-gradient(90deg, rgba(34,225,255,0.35), rgba(161,47,255,0.35), rgba(255,77,141,0.35));
+  background-size: 200% 100%;
+  animation: header-shine 14s linear infinite;
+}
+@keyframes header-shine {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}

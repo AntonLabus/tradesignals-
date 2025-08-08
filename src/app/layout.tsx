@@ -2,10 +2,12 @@ import './globals.css';
 import React, { ReactNode } from 'react';
 import Link from 'next/link';
 import NextThemesProvider from '../components/ThemeProvider';
+import type { Metadata } from 'next';
 
-export const metadata = {
+export const metadata: Metadata = {
   title: 'TradeSignals',
-  description: 'Forex & Crypto trading signals dashboard',
+  description: 'Trading signals for Forex and Crypto',
+  icons: { icon: '/favicon.ico' }
 };
 
 interface RootLayoutProps {

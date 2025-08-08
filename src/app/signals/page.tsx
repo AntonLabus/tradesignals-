@@ -1,18 +1,7 @@
 import SignalsTable from './SignalsTable';
 import TimeframeSelectorClient from '../../components/TimeframeSelectorClient';
 import { Metadata } from 'next';
-import { calculateSignal } from '../../lib/signals';
-
-type Signal = {
-  pair: string;
-  assetClass: 'Forex' | 'Crypto';
-  type: 'Buy' | 'Sell' | 'Hold';
-  confidence: number;
-  timeframe: string;
-  buyLevel: number;
-  stopLoss: number;
-  takeProfit: number;
-};
+import { calculateSignal, FullSignalResult } from '../../lib/signals';
 
 export const metadata: Metadata = {
   title: 'Signals · TradeSignals',
@@ -24,37 +13,33 @@ interface SignalsPageProps {
   readonly searchParams?: Promise<{ readonly timeframe?: string }>;
 }
 export default async function SignalsPage({ searchParams }: SignalsPageProps) {
-  // Define the pairs to display
-  const pairs = ['EUR/USD', 'USD/JPY', 'BTC/USD', 'ETH/USD'];
-
-  // Determine timeframe from URL (default to 1H)
+  const pairs = ['EUR/USD', 'USD/JPY', 'GBP/USD', 'BTC/USD', 'ETH/USD'];
   const resolvedSearchParams = await searchParams;
   const timeframe = resolvedSearchParams?.timeframe ?? '1H';
-  // Calculate signals using full trading rules engine
-  const signals = await Promise.all(
-    pairs.map(async pair => {
-      try {
-        return await calculateSignal(pair, timeframe);
-      } catch (error) {
-        console.error('Error calculating signal for', pair, error);
-        // Fallback signal to prevent crash
-        const assetClass: 'Crypto' | 'Forex' = /USDT$|USD$/.test(pair) ? 'Crypto' : 'Forex';
-        const typeValue = 'Hold' as const;
-        return {
-          pair,
-          assetClass,
-          type: typeValue,
-          confidence: 0,
-          timeframe,
-          buyLevel: 0,
-          stopLoss: 0,
-          takeProfit: 0,
-          explanation: 'Error fetching data',
-          news: [] as { title: string; url: string }[],
-        };
-      }
-    })
-  );
+  // Sequential to reduce upstream rate spikes
+  const signals: FullSignalResult[] = [];
+  for (const pair of pairs) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const sig = await calculateSignal(pair, timeframe);
+      signals.push(sig);
+    } catch {
+      signals.push({
+        pair,
+        assetClass: /USD/.test(pair) ? 'Forex' : 'Crypto',
+        type: 'Hold',
+        confidence: 0,
+        timeframe,
+        buyLevel: 0,
+        stopLoss: 0,
+        takeProfit: 0,
+        explanation: 'Error',
+        news: [],
+        indicators: { rsi: 0, sma50: 0, sma200: 0 },
+        fundamentals: { score: 0, factors: [] },
+      });
+    }
+  }
 
   return (
     <div className="space-y-6">

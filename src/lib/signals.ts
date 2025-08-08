@@ -55,17 +55,32 @@ const HISTORY_LOOKBACK: Record<string, number> = { '1m': 300, '5m': 300, '15m': 
 
 interface PriceSeries { closes: number[]; highs?: number[]; lows?: number[]; }
 
-/**
- * Generate fallback mock data when API calls fail
- */
-const generateFallbackData = (pair: string): number[] => {
-  const basePrice = isCrypto(pair) ? 50000 : 1.1;
-  const variance = isCrypto(pair) ? 1000 : 0.1;
-  return Array.from({ length: 30 }, () => basePrice + Math.random() * variance);
-};
-
+// Reintroduce simple in-memory cache and fallback generator
 const memoryCache: Record<string, { ts: number; data: number[] }> = {};
 function cacheKey(pair: string, tf: string) { return `${pair}:${tf}`; }
+const generateFallbackData = (pair: string): number[] => {
+  const base = pair.split('/')[0].toUpperCase();
+  const isC = ['BTC','ETH','SOL','XRP','ADA','DOGE','LTC','BNB','DOT','AVAX','LINK'].includes(base);
+  const basePrice = isC ? 50000 : 1.1;
+  const variance = isC ? 1000 : 0.05;
+  return Array.from({ length: 60 }, (_, i) => basePrice + Math.sin(i / 5) * variance * 0.01 + (Math.random() - 0.5) * variance * 0.002);
+};
+
+// Helper: fallback daily timeseries via exchangerate.host
+async function fetchForexTimeseriesFallback(pair: string): Promise<PriceSeries> {
+  const [fromSym, toSym] = pair.split('/');
+  const end = new Date();
+  const start = new Date(end.getTime() - 1000 * 60 * 60 * 24 * 180); // ~180 days
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  const url = 'https://api.exchangerate.host/timeseries';
+  const res = await axios.get(url, { params: { start_date: fmt(start), end_date: fmt(end), base: fromSym, symbols: toSym } });
+  const rates = res.data?.rates;
+  if (!rates) throw new Error('exchangerate.host timeseries empty');
+  const dates = Object.keys(rates).sort((a, b) => a.localeCompare(b));
+  const closes = dates.map((d) => Number(rates[d]?.[toSym] ?? NaN)).filter((n) => Number.isFinite(n));
+  if (!closes.length) throw new Error('exchangerate.host no numeric closes');
+  return { closes };
+}
 
 /**
  * Fetch historical crypto prices from CoinGecko
@@ -113,22 +128,36 @@ async function fetchForexHistoricalData(pair: string, timeframe: string): Promis
   const [fromSym, toSym] = pair.split('/');
   // Use full output when daily timeframe to obtain >200 bars for SMA200
   const wantExtended = timeframe === '1D';
-  const response = await axios.get('https://www.alphavantage.co/query', {
-    params: { function: 'FX_DAILY', from_symbol: fromSym, to_symbol: toSym, apikey: process.env.ALPHA_VANTAGE_API_KEY || '', outputsize: wantExtended ? 'full' : 'compact' }
-  });
-  const ts = response.data?.['Time Series (FX)'];
-  if (!ts) throw new Error('No forex data received from Alpha Vantage');
-  const rawEntries = Object.values(ts);
-  const entries: { [k: string]: string }[] = rawEntries.map(e => e as { [k: string]: string }); // map to typed objects
-  // Keep last N (ensure at least 400 if extended available)
-  const sliceCount = wantExtended ? 400 : 60;
-  const sliced = entries.slice(0, sliceCount);
-  const closes: number[] = []; const highs: number[] = []; const lows: number[] = [];
-  sliced.forEach(d => { closes.push(parseFloat(d['4. close'])); highs.push(parseFloat(d['2. high'])); lows.push(parseFloat(d['3. low'])); });
-  const revCloses = [...closes].reverse();
-  const revHighs = [...highs].reverse();
-  const revLows = [...lows].reverse();
-  return { closes: revCloses, highs: revHighs, lows: revLows };
+  try {
+    const response = await axios.get('https://www.alphavantage.co/query', {
+      params: { function: 'FX_DAILY', from_symbol: fromSym, to_symbol: toSym, apikey: process.env.ALPHA_VANTAGE_API_KEY || '', outputsize: wantExtended ? 'full' : 'compact' }
+    });
+    const ts = response.data?.['Time Series (FX)'];
+    if (!ts) throw new Error('No forex data received from Alpha Vantage');
+    const rawEntries = Object.values(ts);
+    const entries: { [k: string]: string }[] = rawEntries.map(e => e as { [k: string]: string });
+    // Keep last N (ensure at least 400 if extended available)
+    const sliceCount = wantExtended ? 400 : 60;
+    const sliced = entries.slice(0, sliceCount);
+    const closes: number[] = []; const highs: number[] = []; const lows: number[] = [];
+    sliced.forEach(d => { closes.push(parseFloat(d['4. close'])); highs.push(parseFloat(d['2. high'])); lows.push(parseFloat(d['3. low'])); });
+    const revCloses = [...closes].reverse();
+    const revHighs = [...highs].reverse();
+    const revLows = [...lows].reverse();
+    if (!revCloses.length || !Number.isFinite(revCloses[revCloses.length - 1])) throw new Error('Alpha Vantage returned empty/invalid closes');
+    return { closes: revCloses, highs: revHighs, lows: revLows };
+  } catch (e) {
+    console.warn('Alpha Vantage FX_DAILY failed, using exchangerate.host timeseries', e instanceof Error ? e.message : e);
+    try {
+      return await fetchForexTimeseriesFallback(pair);
+    } catch (e2) {
+      console.warn('Timeseries fallback failed, using synthetic series', e2 instanceof Error ? e2.message : e2);
+      // Generate synthetic close data as a last resort (60 points, ~30 min)
+      const basePrice = 1.1;
+      const closes = Array.from({ length: 60 }, (_, i) => basePrice + Math.sin(i / 6) * 0.01 + (Math.random() - 0.5) * 0.002);
+      return { closes };
+    }
+  }
 }
 
 /**
@@ -370,13 +399,17 @@ function classifyRisk(volRatio: number): RiskCategory {
 async function fetchCurrentPrice(pair: string, fallbackPrice: number): Promise<number> {
   try {
     const { getCryptoPrice, getForexPrice } = await import('./api');
+    let price = 0;
     if (isCrypto(pair)) {
       const priceData = await getCryptoPrice(pair);
-      return priceData.price;
+      price = Number(priceData.price) || 0;
     } else {
       const priceData = await getForexPrice(pair);
-      return priceData.price;
+      price = Number(priceData.price) || 0;
     }
+    // If external price providers failed or returned 0/NaN, fall back to last known close
+    if (!Number.isFinite(price) || price <= 0) return fallbackPrice;
+    return price;
   } catch (e) {
     console.warn('fetchCurrentPrice failed, using fallback', e instanceof Error ? e.message : e);
     return fallbackPrice;

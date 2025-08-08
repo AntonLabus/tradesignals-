@@ -40,12 +40,16 @@ const TIMEFRAME_CONFIG: Record<string, { macdFast: number; macdSlow: number; mac
   '1D': { macdFast: 12, macdSlow: 26, macdSignal: 9 },
 };
 
+// Explicit crypto symbol set to avoid treating every USD pair as crypto
+const CRYPTO_SYMBOLS = new Set(['BTC','ETH','SOL','XRP','ADA','DOGE','LTC','BNB','DOT','AVAX','LINK']);
+const isCrypto = (pair: string): boolean => {
+  const base = pair.split('/')[0].toUpperCase();
+  return CRYPTO_SYMBOLS.has(base);
+};
+
 const HISTORY_LOOKBACK: Record<string, number> = { '1m': 300, '5m': 300, '15m': 200, '30m': 180, '1H': 120, '4H': 90, '1D': 365 };
 
-/**
- * Check if a trading pair is a cryptocurrency
- */
-const isCrypto = (pair: string): boolean => /USDT$|USD$/.exec(pair) !== null;
+interface PriceSeries { closes: number[]; highs?: number[]; lows?: number[]; }
 
 /**
  * Generate fallback mock data when API calls fail
@@ -53,7 +57,7 @@ const isCrypto = (pair: string): boolean => /USDT$|USD$/.exec(pair) !== null;
 const generateFallbackData = (pair: string): number[] => {
   const basePrice = isCrypto(pair) ? 50000 : 1.1;
   const variance = isCrypto(pair) ? 1000 : 0.1;
-  return Array.from({length: 30}, () => basePrice + Math.random() * variance);
+  return Array.from({ length: 30 }, () => basePrice + Math.random() * variance);
 };
 
 const memoryCache: Record<string, { ts: number; data: number[] }> = {};
@@ -62,8 +66,6 @@ function cacheKey(pair: string, tf: string) { return `${pair}:${tf}`; }
 /**
  * Fetch historical crypto prices from CoinGecko
  */
-interface PriceSeries { closes: number[]; highs?: number[]; lows?: number[]; }
-
 async function fetchCryptoHistoricalData(pair: string, timeframe: string): Promise<PriceSeries> {
   const id = pair.split('/')[0].toLowerCase();
   // For daily timeframe request longer history for better long-term indicators

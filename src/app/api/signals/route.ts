@@ -5,9 +5,19 @@ import { calculateSignal, FullSignalResult } from '../../../lib/signals';
 const cache: Record<string, { ts: number; data: FullSignalResult }> = {};
 const TTL = 1000 * 60; // 1 minute per pair/timeframe
 
+// Central default pairs list (Forex majors/minors + popular cryptos)
+const DEFAULT_PAIRS = [
+  // Forex majors
+  'EUR/USD','USD/JPY','GBP/USD','USD/CHF','AUD/USD','USD/CAD','NZD/USD',
+  // Major crosses
+  'EUR/JPY','GBP/JPY','EUR/GBP','AUD/JPY','EUR/AUD',
+  // Popular cryptos (vs USD)
+  'BTC/USD','ETH/USD','SOL/USD','XRP/USD','ADA/USD','DOGE/USD','BNB/USD','LTC/USD','DOT/USD','AVAX/USD','LINK/USD','MATIC/USD','TRX/USD','SHIB/USD','BCH/USD','XLM/USD','NEAR/USD','UNI/USD'
+];
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const pairsParam = searchParams.get('pairs') || 'EUR/USD,USD/JPY,GBP/USD,BTC/USD,ETH/USD';
+  const pairsParam = searchParams.get('pairs') || DEFAULT_PAIRS.join(',');
   const timeframe = searchParams.get('timeframe') || '1H';
   const pairs = pairsParam.split(',').map(p => p.trim()).filter(Boolean);
 
@@ -30,7 +40,7 @@ export async function GET(req: Request) {
       console.error(`Signal computation failed for ${pair} ${timeframe}:`, err.message);
       // Explicitly determine asset class with literal typing
       const base = pair.split('/')[0].toUpperCase();
-      const assetClass: 'Forex' | 'Crypto' = /^(BTC|ETH)$/.test(base) ? 'Crypto' : 'Forex';
+      const assetClass: 'Forex' | 'Crypto' = /^(BTC|ETH|SOL|XRP|ADA|DOGE|BNB|LTC|DOT|AVAX|LINK|MATIC|TRX|SHIB|BCH|XLM|NEAR|UNI)$/.test(base) ? 'Crypto' : 'Forex';
       const explanation = `Error generating signal: ${err.message.slice(0, 140)}`; // trimmed to avoid very long messages
       results.push({
         pair,

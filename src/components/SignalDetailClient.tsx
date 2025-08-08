@@ -1,6 +1,8 @@
 "use client";
 import React, { useState } from 'react';
 import dynamic from 'next/dynamic';
+import type { FullSignalResult } from '../lib/signals';
+
 // Define props for TradingViewWidget
 interface TradingViewWidgetProps {
   symbol: string;
@@ -16,23 +18,13 @@ const TradingViewWidget = dynamic<TradingViewWidgetProps>(
 import TimeframeSelector from './TimeframeSelector';
 
 export interface NewsItem { title: string; url: string; }
-export interface SignalData {
-  pair: string;
-  assetClass: string;
-  type: 'Buy' | 'Sell' | 'Hold';
-  confidence: number;
-  timeframe: string;
-  buyLevel: number;
-  stopLoss: number;
-  takeProfit: number;
-  explanation: string;
-  news: NewsItem[];
-}
+export interface SignalData extends FullSignalResult {}
 
-interface Props { readonly signal: SignalData; }
-
-export default function SignalDetailClient({ signal }: Props) {
+export default function SignalDetailClient({ signal }: { readonly signal: FullSignalResult }) {
   const [timeframe, setTimeframe] = useState(signal.timeframe);
+  let typeColor = 'text-gray-600';
+  if (signal.type === 'Buy') typeColor = 'text-green-600';
+  else if (signal.type === 'Sell') typeColor = 'text-red-600';
 
   return (
     <div className="space-y-6">
@@ -49,34 +41,72 @@ export default function SignalDetailClient({ signal }: Props) {
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-white dark:bg-gray-800 p-4 rounded shadow">
-          <h2 className="text-xl font-semibold">Signal Data</h2>
-          <ul className="mt-2 space-y-1">
-            <li>
-              Type: <span className={`${signal.type === 'Buy' ? 'text-green-600' : 'text-red-600'} font-semibold`}>{signal.type}</span>
-            </li>
+          <h2 className="text-xl font-semibold mb-2">Signal</h2>
+          <ul className="mt-2 space-y-1 text-sm">
+            <li>Type: <span className={`font-semibold ${typeColor}`}>{signal.type}</span></li>
             <li>Confidence: {signal.confidence}%</li>
             <li>Timeframe: {timeframe}</li>
-            <li>Buy Level: {signal.buyLevel}</li>
-            <li>Stop Loss: {signal.stopLoss}</li>
-            <li>Take Profit: {signal.takeProfit}</li>
+            <li>Buy: {signal.buyLevel}</li>
+            <li>Stop: {signal.stopLoss}</li>
+            <li>Target: {signal.takeProfit}</li>
+            <li>Risk/Reward: {signal.riskReward?.toFixed?.(2) ?? '—'}</li>
+            <li>Risk: {signal.riskCategory ?? '—'}</li>
+            <li>Volatility: {signal.volatilityPct?.toFixed?.(2) ?? '—'}%</li>
           </ul>
         </div>
         <div className="bg-white dark:bg-gray-800 p-4 rounded shadow">
-          <h2 className="text-xl font-semibold">Analysis & News</h2>
-          <p className="mt-2">{signal.explanation}</p>
-          <h3 className="mt-4 font-semibold">Related News</h3>
-          <ul className="list-disc list-inside mt-2 space-y-1">
-            {signal.news.map((item) => (
-              <li key={item.url}>
-                <a href={item.url} className="text-blue-500 hover:underline" target="_blank" rel="noopener noreferrer">
-                  {item.title}
-                </a>
-              </li>
-            ))}
+          <h2 className="text-xl font-semibold mb-2">Technical</h2>
+          <ul className="mt-2 space-y-1 text-sm">
+            <li>RSI: {signal.indicators?.rsi?.toFixed?.(2) ?? '—'}</li>
+            <li>SMA50: {signal.indicators?.sma50?.toFixed?.(2) ?? '—'}</li>
+            <li>SMA200: {signal.indicators?.sma200?.toFixed?.(2) ?? '—'}</li>
+            <li>EMA20: {signal.indicators?.ema20?.toFixed?.(2) ?? '—'}</li>
+            <li>EMA50: {signal.indicators?.ema50?.toFixed?.(2) ?? '—'}</li>
+            <li>ATR(est): {signal.indicators?.atr?.toFixed?.(2) ?? '—'}</li>
+            <li>MACD: {signal.indicators?.macd?.toFixed?.(2) ?? '—'}</li>
+            <li>MACD Signal: {signal.indicators?.macdSignal?.toFixed?.(2) ?? '—'}</li>
+            <li>MACD Hist: {signal.indicators?.macdHist?.toFixed?.(2) ?? '—'}</li>
+            <li className="mt-2">Technical Score: {signal.technicalScore ?? '—'}</li>
           </ul>
         </div>
+        <div className="bg-white dark:bg-gray-800 p-4 rounded shadow">
+          <h2 className="text-xl font-semibold mb-2">Fundamentals</h2>
+          <p className="text-sm mb-2">Score: {signal.fundamentals?.score ?? signal.fundamentalScore ?? '—'}</p>
+          <ul className="list-disc list-inside mt-2 text-xs space-y-1 max-h-40 overflow-auto pr-1">
+            {signal.fundamentals?.factors?.map(f => <li key={f}>{f}</li>)}
+          </ul>
+        </div>
+        <div className="bg-white dark:bg-gray-800 p-4 rounded shadow">
+          <h2 className="text-xl font-semibold mb-2">Composite & Sections</h2>
+          <p className="text-sm">Composite: {signal.compositeScore ?? '—'}</p>
+          <div className="mt-2 space-y-3 max-h-48 overflow-auto pr-1">
+            {signal.explanationSections?.map(sec => (
+              <div key={sec.title}>
+                <h3 className="font-semibold text-sm mb-1">{sec.title}</h3>
+                <ul className="list-disc list-inside text-xs space-y-0.5">
+                  {sec.details.map(d => <li key={d}>{d}</li>)}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white dark:bg-gray-800 p-4 rounded shadow">
+        <h2 className="text-xl font-semibold">Analysis & News</h2>
+        <p className="mt-2 text-sm leading-relaxed">{signal.explanation}</p>
+        <h3 className="mt-4 font-semibold">Related News</h3>
+        <ul className="list-disc list-inside mt-2 space-y-1 text-sm">
+          {signal.news.map((item) => (
+            <li key={item.url}>
+              <a href={item.url} className="text-blue-500 hover:underline" target="_blank" rel="noopener noreferrer">
+                {item.title}
+              </a>
+            </li>
+          ))}
+        </ul>
       </div>
     </div>
   );

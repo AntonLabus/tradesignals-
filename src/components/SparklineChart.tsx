@@ -7,11 +7,12 @@ import axios from 'axios';
 Chart.register(LineController, LineElement, PointElement, LinearScale, CategoryScale, TimeScale, Title, Tooltip);
 
 interface SparklineChartProps {
-  pair: string;
-  timeframe: string;
+  readonly pair: string;
+  readonly timeframe: string;
 }
 
-export default function SparklineChart({ pair, timeframe }: SparklineChartProps) {
+export default function SparklineChart(props: Readonly<SparklineChartProps>) {
+  const { pair, timeframe } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {

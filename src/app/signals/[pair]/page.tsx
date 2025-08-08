@@ -1,6 +1,6 @@
 import { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { calculateSignal } from '../../../lib/signals';
+import { calculateSignal, FullSignalResult } from '../../../lib/signals';
 import SignalDetailClient from '../../../components/SignalDetailClient';
 
 export async function generateMetadata({ params }: { 
@@ -28,7 +28,7 @@ export default async function SignalDetailPage({ params, searchParams }: SignalD
   // Determine timeframe, default to 1H
   const timeframe = resolvedSearchParams?.timeframe || '1H';
   // Calculate full signal with explanation & news
-  const signal = await calculateSignal(pair, timeframe);
+  const signal: FullSignalResult = await calculateSignal(pair, timeframe);
 
   // Render client-side signal detail
   return <SignalDetailClient signal={signal} />;

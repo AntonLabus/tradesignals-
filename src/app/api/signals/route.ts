@@ -55,13 +55,13 @@ export async function GET(req: Request) {
 
   const results: FullSignalResult[] = [];
 
-  outer: for (let i = 0; i < pairs.length; i += BATCH_SIZE) {
+  for (let i = 0; i < pairs.length; i += BATCH_SIZE) {
     if (Date.now() - start > GLOBAL_BUDGET) {
       // Budget exhausted, append fallbacks for remaining pairs
       for (let j = i; j < pairs.length; j++) {
         results.push(fallbackSignal(pairs[j], timeframe, 'Skipped (time budget)'));
       }
-      break outer;
+      break;
     }
     const batch = pairs.slice(i, i + BATCH_SIZE);
     // Prepare promises for batch

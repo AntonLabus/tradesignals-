@@ -43,16 +43,16 @@ export default function SignalsSidebar({ signals, filters }: SignalsSidebarProps
           <div className="flex items-center justify-between"><span>Hold</span><span className="text-gray-400">{counts.byType['Hold'] || 0}</span></div>
           <div className="neon-divider" />
           <div>
-            <label className="block text-xs mb-1">Asset Class</label>
-            <select className="w-full bg-white/5 border border-white/10 rounded p-1" value={assetFilter} onChange={(e) => filters.setAssetFilter(e.target.value as any)}>
+            <label htmlFor="sidebar-assetFilter" className="block text-xs mb-1">Asset Class</label>
+            <select id="sidebar-assetFilter" className="w-full bg-white/5 border border-white/10 rounded p-1" value={assetFilter} onChange={(e) => setAssetFilter(e.target.value as any)}>
               <option value="All">All</option>
               <option value="Forex">Forex</option>
               <option value="Crypto">Crypto</option>
             </select>
           </div>
           <div>
-            <label className="block text-xs mb-1">Type</label>
-            <select className="w-full bg-white/5 border border-white/10 rounded p-1" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as any)}>
+            <label htmlFor="sidebar-typeFilter" className="block text-xs mb-1">Type</label>
+            <select id="sidebar-typeFilter" className="w-full bg-white/5 border border-white/10 rounded p-1" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as any)}>
               <option value="All">All</option>
               <option value="Buy">Buy</option>
               <option value="Sell">Sell</option>
@@ -60,8 +60,8 @@ export default function SignalsSidebar({ signals, filters }: SignalsSidebarProps
             </select>
           </div>
           <div>
-            <label className="block text-xs mb-1">Timeframe</label>
-            <select className="w-full bg-white/5 border border-white/10 rounded p-1" value={timeframeFilter} onChange={(e) => setTimeframeFilter(e.target.value)}>
+            <label htmlFor="sidebar-timeframeFilter" className="block text-xs mb-1">Timeframe</label>
+            <select id="sidebar-timeframeFilter" className="w-full bg-white/5 border border-white/10 rounded p-1" value={timeframeFilter} onChange={(e) => setTimeframeFilter(e.target.value)}>
               <option value="All">All</option>
               {timeframes.map(tf => <option key={tf} value={tf}>{tf}</option>)}
             </select>

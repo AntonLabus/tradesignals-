@@ -4,15 +4,19 @@ import Link from 'next/link';
 import SimpleChart from '../../components/SimpleChart';
 import type { FullSignalResult } from '../../lib/signals';
 
+// Type aliases for filters (Sonar S4323)
+type AssetFilter = 'All' | 'Forex' | 'Crypto';
+type SignalTypeFilter = 'All' | 'Buy' | 'Sell' | 'Hold';
+
 // Narrow subset type (reuse interface)
 interface SignalsTableProps {
   readonly signals: FullSignalResult[];
   readonly showInlineFilters?: boolean;
   readonly externalFilters?: {
-    assetFilter: 'All' | 'Forex' | 'Crypto';
-    setAssetFilter: (v: 'All' | 'Forex' | 'Crypto') => void;
-    typeFilter: 'All' | 'Buy' | 'Sell' | 'Hold';
-    setTypeFilter: (v: 'All' | 'Buy' | 'Sell' | 'Hold') => void;
+    assetFilter: AssetFilter;
+    setAssetFilter: (v: AssetFilter) => void;
+    typeFilter: SignalTypeFilter;
+    setTypeFilter: (v: SignalTypeFilter) => void;
     timeframeFilter: string;
     setTimeframeFilter: (v: string) => void;
   };
@@ -39,8 +43,8 @@ export default function SignalsTable({ signals: initial, showInlineFilters = tru
   const [error, setError] = useState<string | null>(null);
 
   // filters (controlled or uncontrolled)
-  const [assetFilterInternal, setAssetFilterInternal] = useState<'All' | 'Forex' | 'Crypto'>(externalFilters?.assetFilter ?? 'All');
-  const [typeFilterInternal, setTypeFilterInternal] = useState<'All' | 'Buy' | 'Sell' | 'Hold'>(externalFilters?.typeFilter ?? 'All');
+  const [assetFilterInternal, setAssetFilterInternal] = useState<AssetFilter>(externalFilters?.assetFilter ?? 'All');
+  const [typeFilterInternal, setTypeFilterInternal] = useState<SignalTypeFilter>(externalFilters?.typeFilter ?? 'All');
   const [timeframeFilterInternal, setTimeframeFilterInternal] = useState<string>(externalFilters?.timeframeFilter ?? 'All');
 
   const assetFilter = externalFilters?.assetFilter ?? assetFilterInternal;
@@ -88,7 +92,7 @@ export default function SignalsTable({ signals: initial, showInlineFilters = tru
         <div className="flex flex-wrap gap-4 mb-4">
           <div>
             <label htmlFor="assetFilter" className="block text-sm font-medium">Asset Class</label>
-            <select id="assetFilter" className="border rounded p-1 bg-white dark:bg-gray-800" value={assetFilter} onChange={(e) => setAssetFilter(e.target.value as any)}>
+            <select id="assetFilter" className="border rounded p-1 bg-white dark:bg-gray-800" value={assetFilter} onChange={(e) => setAssetFilter(e.target.value as AssetFilter)}>
               <option value="All">All</option>
               <option value="Forex">Forex</option>
               <option value="Crypto">Crypto</option>
@@ -96,7 +100,7 @@ export default function SignalsTable({ signals: initial, showInlineFilters = tru
           </div>
           <div>
             <label htmlFor="typeFilter" className="block text-sm font-medium">Type</label>
-            <select id="typeFilter" className="border rounded p-1 bg-white dark:bg-gray-800" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as any)}>
+            <select id="typeFilter" className="border rounded p-1 bg-white dark:bg-gray-800" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as SignalTypeFilter)}>
               <option value="All">All</option>
               <option value="Buy">Buy</option>
               <option value="Sell">Sell</option>

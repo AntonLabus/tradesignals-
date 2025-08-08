@@ -1,76 +1,73 @@
 "use client";
 import React from 'react';
 
-interface SimpleChartProps {
+export interface SimpleChartProps { // export for external type checking
   readonly pair: string;
   readonly signalType: 'Buy' | 'Sell' | 'Hold';
   readonly confidence: number;
+  readonly history?: ReadonlyArray<number>; // optional closes for sparkline (readonly)
 }
 
-export default function SimpleChart({ pair, signalType, confidence }: SimpleChartProps) {
-  // Generate simple mock data for visualization
-  const generateChartData = () => {
-    const points = 20;
-    const data = [];
-    let baseValue = 100;
-    
-    for (let i = 0; i < points; i++) {
-      const variation = (Math.random() - 0.5) * 10;
-      baseValue += variation;
-      data.push(baseValue);
-    }
-    
-    return data;
-  };
+export default function SimpleChart(props: Readonly<SimpleChartProps>) {
+  const { pair, signalType, confidence, history } = props;
 
-  const data = generateChartData();
+  // Use passed history if present; else generate small mock sequence (client-only)
+  const data = React.useMemo(() => {
+    if (history && history.length > 1) {
+      // downsample to max 40 points for small chart
+      const maxPts = 40;
+      if (history.length <= maxPts) return [...history];
+      const step = Math.floor(history.length / maxPts) || 1;
+      return history.filter((_, i) => i % step === 0).slice(-maxPts);
+    }
+    // fallback mock
+    const points = 20;
+    const arr: number[] = [];
+    let base = 100;
+    for (let i = 0; i < points; i++) {
+      base += (Math.random() - 0.5) * 10;
+      arr.push(base);
+    }
+    return arr;
+  }, [history]);
+
   const max = Math.max(...data);
   const min = Math.min(...data);
-  const range = max - min;
+  const range = max - min || 1;
 
-  // Create SVG path for the chart line
-  const createPath = (data: number[]) => {
+  const pathD = React.useMemo(() => {
     const width = 100;
     const height = 40;
-    
     return data
-      .map((value, index) => {
-        const x = (index / (data.length - 1)) * width;
-        const y = height - ((value - min) / range) * height;
-        return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
+      .map((v, idx) => {
+        const x = (idx / (data.length - 1)) * width;
+        const y = height - ((v - min) / range) * height;
+        return `${idx === 0 ? 'M' : 'L'} ${x} ${y}`;
       })
       .join(' ');
-  };
+  }, [data, min, range]);
 
-  const getColorBySignal = (signal: string) => {
-    switch (signal) {
-      case 'Buy': return '#10B981'; // green
-      case 'Sell': return '#EF4444'; // red
-      default: return '#6B7280'; // gray
-    }
-  };
+  let color = '#6B7280'; // default hold/neutral
+  if (signalType === 'Buy') {
+    color = '#10B981';
+  } else if (signalType === 'Sell') {
+    color = '#EF4444';
+  }
 
   return (
-    <div className="w-[120px] h-[60px] bg-white border border-gray-200 rounded p-1 flex flex-col">
+    <div className="w-[120px] h-[60px] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded p-1 flex flex-col">
       <div className="flex-1 flex items-center justify-center">
         <svg width="100" height="40" viewBox="0 0 100 40">
-          <path
-            d={createPath(data)}
-            stroke={getColorBySignal(signalType)}
-            strokeWidth="1.5"
-            fill="none"
-            className="drop-shadow-sm"
-          />
-          {/* Add dots at key points */}
+          <path d={pathD} stroke={color} strokeWidth="1.5" fill="none" />
           <circle
-            cx="90"
+            cx={100 - 10}
             cy={40 - ((data[data.length - 1] - min) / range) * 40}
-            r="1.5"
-            fill={getColorBySignal(signalType)}
+            r={1.6}
+            fill={color}
           />
         </svg>
       </div>
-      <div className="text-[8px] text-center text-gray-600 font-medium">
+      <div className="text-[8px] text-center text-gray-600 dark:text-gray-300 font-medium truncate" title={pair}>
         {signalType} {confidence}%
       </div>
     </div>

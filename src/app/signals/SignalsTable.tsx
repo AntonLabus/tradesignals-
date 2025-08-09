@@ -138,6 +138,8 @@ export default function SignalsTable({ signals: initial, showInlineFilters = tru
 
               const tech = sig.technicalScore ?? undefined;
               const fund = sig.fundamentals?.score ?? sig.fundamentalScore ?? undefined;
+              const techDisplay = tech != null ? Math.round(tech) : undefined;
+              const fundDisplay = fund != null ? Math.round(fund) : undefined;
               const tfTooltip = `Risk: ${sig.riskCategory ?? '—'} | Vol: ${sig.volatilityPct?.toFixed?.(2) ?? '—'}% | R/R: ${sig.riskReward?.toFixed?.(2) ?? '—'}`;
 
               return (
@@ -164,9 +166,9 @@ export default function SignalsTable({ signals: initial, showInlineFilters = tru
                     <td className="px-4 py-2 text-center" title={tfTooltip}>
                       {tech != null || fund != null ? (
                         <div className="flex items-center justify-center gap-2 text-xs">
-                          <span className="inline-flex items-center gap-1"><span className="text-gray-500">T</span> {tech ?? '—'}</span>
+                          <span className="inline-flex items-center gap-1"><span className="text-gray-500">T</span> {techDisplay ?? '—'}</span>
                           <span className="text-gray-600">/</span>
-                          <span className="inline-flex items-center gap-1"><span className="text-gray-500">F</span> {fund ?? '—'}</span>
+                          <span className="inline-flex items-center gap-1"><span className="text-gray-500">F</span> {fundDisplay ?? '—'}</span>
                         </div>
                       ) : '—'}
                     </td>

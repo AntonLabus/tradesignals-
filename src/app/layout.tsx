@@ -1,9 +1,8 @@
 import './globals.css';
 import React, { ReactNode } from 'react';
 import Link from 'next/link';
-import NextThemesProvider from '../components/ThemeProvider';
 import type { Metadata } from 'next';
-import ThemeToggle from '../components/ThemeToggle';
+import Background3D from '../components/Background3D';
 
 export const metadata: Metadata = {
   title: 'TradeSignals',
@@ -17,25 +16,23 @@ interface RootLayoutProps {
 
 export default function RootLayout({ children }: RootLayoutProps) {
   return (
-    <html lang="en">
-      <body className="min-h-screen text-gray-100">
-        <NextThemesProvider>
-          <header className="sticky top-0 z-40 header-gradient/30 backdrop-blur supports-[backdrop-filter]:bg-white/5">
-            <div className="max-w-6xl mx-auto flex items-center justify-between px-6 py-4">
-              <div className="flex items-center gap-3">
-                <div className="w-2 h-2 rounded-full bg-neon-cyan shadow-neon animate-glow" />
-                <Link href="/" className="text-lg md:text-2xl font-bold tracking-tight">TradeSignals</Link>
-              </div>
-              <nav className="flex items-center gap-6 text-sm">
-                <Link href="/" className="hover:text-neon-cyan">Home</Link>
-                <Link href="/signals" className="hover:text-neon-violet">Signals</Link>
-                <ThemeToggle />
-              </nav>
+    <html lang="en" className="dark">
+      <body className="min-h-screen text-gray-100 bg-black">
+        <Background3D />
+        <header className="sticky top-0 z-40 header-gradient/30 backdrop-blur supports-[backdrop-filter]:bg-white/5">
+          <div className="max-w-6xl mx-auto flex items-center justify-between px-6 py-4">
+            <div className="flex items-center gap-3">
+              <div className="w-2 h-2 rounded-full bg-neon-cyan shadow-neon animate-glow" />
+              <Link href="/" className="text-lg md:text-2xl font-bold tracking-tight">TradeSignals</Link>
             </div>
-            <div className="neon-divider" />
-          </header>
-          <main className="max-w-6xl mx-auto px-6 py-8 space-y-6">{children}</main>
-        </NextThemesProvider>
+            <nav className="flex items-center gap-6 text-sm">
+              <Link href="/" className="hover:text-neon-cyan">Home</Link>
+              <Link href="/signals" className="hover:text-neon-violet">Signals</Link>
+            </nav>
+          </div>
+          <div className="neon-divider" />
+        </header>
+        <main className="relative max-w-6xl mx-auto px-6 py-8 space-y-6">{children}</main>
       </body>
     </html>
   );

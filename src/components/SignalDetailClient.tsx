@@ -47,6 +47,8 @@ export default function SignalDetailClient({ signal }: { readonly signal: FullSi
   const [currentSignal, setCurrentSignal] = useState<FullSignalResult>(signal);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Sequence to guard against out-of-order responses when switching timeframes quickly
+  const [seq, setSeq] = useState(0);
   // Backtest UI state
   const [btLoading, setBtLoading] = useState(false);
   const [btError, setBtError] = useState<string | null>(null);
@@ -86,16 +88,18 @@ export default function SignalDetailClient({ signal }: { readonly signal: FullSi
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
-  async function load() {
+    const mySeq = seq + 1;
+    setSeq(mySeq);
+    async function load() {
       try {
         setLoading(true);
         setError(null);
-  const url = `/api/signals?pairs=${encodeURIComponent(signal.pair)}&timeframe=${encodeURIComponent(timeframe)}&debug=1`;
-        const res = await fetch(url, { signal: controller.signal });
+        const url = `/api/signals?pairs=${encodeURIComponent(signal.pair)}&timeframe=${encodeURIComponent(timeframe)}&debug=1&_=${Date.now()}`;
+        const res = await fetch(url, { signal: controller.signal, cache: 'no-store' as RequestCache });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
         const updated: FullSignalResult | undefined = json?.signals?.[0];
-        if (!cancelled && updated) {
+        if (!cancelled && updated && mySeq === seq + 1) {
           setCurrentSignal(updated);
         }
       } catch (e) {

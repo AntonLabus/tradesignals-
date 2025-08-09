@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 import { calculateSignal, FullSignalResult } from '../../../lib/signals';
 import { getDefaultTimeframe, sanitizeTimeframe } from '../../../lib/timeframes';
 
@@ -132,5 +134,8 @@ export async function GET(req: Request) {
   if (debug) {
     meta.sources = results.map(r => ({ pair: r.pair, src: (r as any).debugSource })).slice(0, 50);
   }
-  return NextResponse.json({ signals: results, meta });
+  return NextResponse.json(
+    { signals: results, meta },
+    { headers: { 'Cache-Control': 'no-store, max-age=0' } }
+  );
 }

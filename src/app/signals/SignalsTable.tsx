@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import SimpleChart from '../../components/SimpleChart';
 import type { FullSignalResult } from '../../lib/signals';
@@ -41,6 +41,12 @@ export default function SignalsTable({ signals: initial, showInlineFilters = tru
   const [signals, setSignals] = useState<FullSignalResult[]>(initial);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [hiddenStaleKeys, setHiddenStaleKeys] = useState<Set<string>>(new Set());
+  const staleTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const STALE_TIMEOUT_MS = 8000; // auto-hide spinner/badge after N ms
+  const makeKey = (s: FullSignalResult) => s.pair + s.timeframe;
+  const hideKey = (key: string) => setHiddenStaleKeys(prev => { const next = new Set(prev); next.add(key); return next; });
+  const showKey = (key: string) => setHiddenStaleKeys(prev => { const next = new Set(prev); next.delete(key); return next; });
 
   // filters (controlled or uncontrolled)
   const [assetFilterInternal, setAssetFilterInternal] = useState<AssetFilter>(externalFilters?.assetFilter ?? 'All');
@@ -107,6 +113,45 @@ export default function SignalsTable({ signals: initial, showInlineFilters = tru
     return () => { aborted = true; controller.abort(); };
   }, [onSignalsUpdate, timeframeFilter]);
 
+  // Auto-hide stale spinners/badges after N seconds, and clear when fresh data arrives.
+  // Effect 1: schedule timers for currently stale rows
+  useEffect(() => {
+    const timers = staleTimers.current;
+    for (const s of signals) {
+      const key = makeKey(s);
+      if (s.stale && !hiddenStaleKeys.has(key) && !timers.has(key)) {
+        const id = setTimeout(() => { hideKey(key); timers.delete(key); }, STALE_TIMEOUT_MS);
+        timers.set(key, id);
+      }
+    }
+  }, [signals, hiddenStaleKeys]);
+
+  // Effect 2: clear timers and badges when fresh data arrives
+  useEffect(() => {
+    const timers = staleTimers.current;
+    for (const s of signals) {
+      const key = makeKey(s);
+      if (!s.stale) {
+        const t = timers.get(key);
+        if (t) { clearTimeout(t); timers.delete(key); }
+        if (hiddenStaleKeys.has(key)) showKey(key);
+      }
+    }
+  }, [signals]);
+
+  // Effect 3: cleanup timers for rows that disappeared
+  useEffect(() => {
+    const timers = staleTimers.current;
+    const present = new Set(signals.map(makeKey));
+    for (const key of Array.from(timers.keys())) {
+      if (!present.has(key)) {
+        const t = timers.get(key);
+        if (t) clearTimeout(t);
+        timers.delete(key);
+      }
+    }
+  }, [signals]);
+
   const timeframes = Array.from(new Set(signals.map((s) => s.timeframe)));
   const filtered = signals.filter(
     (s) =>
@@ -163,6 +208,8 @@ export default function SignalsTable({ signals: initial, showInlineFilters = tru
           </thead>
           <tbody>
             {filtered.map(sig => {
+              const staleKey = sig.pair + sig.timeframe;
+              const showStale = Boolean(sig.stale) && !hiddenStaleKeys.has(staleKey);
               let confColor: string;
               if (sig.confidence > 70) confColor = 'bg-green-500';
               else if (sig.confidence > 40) confColor = 'bg-amber-500';
@@ -179,7 +226,7 @@ export default function SignalsTable({ signals: initial, showInlineFilters = tru
                   <tr className="hover:bg-white/5 border-b-0" title={tfTooltip}>
                     <td className="px-4 py-2 relative">
                       <SimpleChart pair={sig.pair} signalType={sig.type} confidence={sig.confidence} history={sig.history} />
-                      {sig.stale ? (
+                      {showStale ? (
                         <div className="absolute top-1 left-1 flex items-center gap-1 text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded px-1.5 py-0.5" title="Refreshing">
                           <span className="inline-block w-2 h-2 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
                         </div>
@@ -194,7 +241,7 @@ export default function SignalsTable({ signals: initial, showInlineFilters = tru
                     <td className="px-4 py-2">
                       <div className="flex items-center gap-2">
                         <span className={`px-2 py-1 rounded text-xs font-semibold inline-block ${badgeColor(sig.type)}`}>{sig.type}</span>
-                        {sig.stale ? (
+                        {showStale ? (
                           <span className="px-1.5 py-0.5 rounded text-[10px] font-medium inline-block bg-amber-500/10 text-amber-300 border border-amber-500/20" title="Soft-stale; refreshing soon">Refreshing…</span>
                         ) : null}
                       </div>

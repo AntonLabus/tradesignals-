@@ -3,7 +3,12 @@ import { calculateSignal, FullSignalResult } from '../../../lib/signals';
 
 // Simple in-memory cache with TTL to reduce external calls
 const cache: Record<string, { ts: number; data: FullSignalResult }> = {};
-const TTL = 1000 * 60 * 3; // 3 minutes per pair/timeframe to smooth over provider delays
+// Dynamic TTL by timeframe: shorter for intraday, longer for daily
+function getTTL(tf: string) {
+  if (tf === '1D') return 10 * 60 * 1000; // 10 min
+  if (tf === '4H') return 3 * 60 * 1000;  // 3 min
+  return 60 * 1000;                       // 1m..1H => 1 min
+}
 
 // Central default pairs list (Forex majors/minors + popular cryptos)
 const DEFAULT_PAIRS = [
@@ -90,6 +95,7 @@ export async function GET(req: Request) {
       const key = pair + ':' + timeframe;
       const now = Date.now();
       const cached = cache[key];
+      const TTL = getTTL(timeframe);
       if (cached && now - cached.ts < TTL) return cached.data; // fresh
       if (Date.now() - start > GLOBAL_BUDGET) {
         return fallbackSignal(pair, timeframe, 'Skipped (time budget)', cached?.data);

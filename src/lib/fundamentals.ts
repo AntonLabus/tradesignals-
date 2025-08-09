@@ -73,10 +73,11 @@ async function fetchExternalData(now: number): Promise<{ articles: any[]; macroN
 
 // Placeholder economic + fundamental scoring. In real implementation integrate
 // economic calendar (rates, CPI, NFP) & company / macro feeds.
-export async function fetchFundamentalData(pair: string): Promise<FundamentalData> {
+export async function fetchFundamentalData(pair: string, timeframe: string = '1H'): Promise<FundamentalData> {
   const now = Date.now();
   const baseScore = baseScoreForPair(pair);
-  const TTL = 5 * 60 * 1000; // 5 minutes
+  // Fresher fundamentals for intraday; longer for daily
+  const TTL = timeframe === '1D' ? 15 * 60 * 1000 : 2 * 60 * 1000;
 
   // Try cache
   if (fundamentalsCache && now - fundamentalsCache.ts < TTL) {
@@ -90,7 +91,19 @@ export async function fetchFundamentalData(pair: string): Promise<FundamentalDat
   // Fetch fresh external data
   try {
     const ext = await fetchExternalData(now);
-    return buildResult(baseScore, pair, ext);
+    // Pair-aware sentiment weighting: boost headlines containing the base or quote symbol
+    const [base, quote] = pair.split('/');
+    const boostTerms = [base.toUpperCase(), quote.toUpperCase(), base.toLowerCase(), quote.toLowerCase()];
+    const boosted = ext.articles.map(a => {
+      const t = a.title || '';
+      const boost = boostTerms.some(term => t.includes(term)) ? 0.2 : 0;
+      return { ...a, boost };
+    });
+    const titles = boosted.map(a => a.title);
+    const sent = computeHeadlineSentiment(titles);
+    const sentiment = { normalized: Math.max(-1, Math.min(1, sent.normalized + boosted.filter(b => b.boost > 0).length * 0.01)), descriptor: sent.descriptor };
+    fundamentalsCache = { ts: now, articles: ext.articles, macroNews: ext.macroNews, globalCrypto: ext.globalCrypto, fng: ext.fng, sentiment };
+    return buildResult(baseScore, pair, fundamentalsCache);
   } catch (e) {
     console.warn('fetchFundamentalData failed', e instanceof Error ? e.message : e);
     return { score: baseScore, factors: ['Fundamental aggregation failed'], news: [] };

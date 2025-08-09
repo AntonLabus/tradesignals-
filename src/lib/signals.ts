@@ -148,77 +148,84 @@ async function fetchForexTimeseriesFallback(pair: string): Promise<PriceSeries> 
  */
 async function fetchCryptoHistoricalData(pair: string, timeframe: string): Promise<PriceSeries> {
   const id = pair.split('/')[0].toLowerCase();
-  // For daily timeframe request longer history for better long-term indicators
-  const wantExtended = timeframe === '1D';
-  try {
-    // Try OHLC endpoint for richer data (limit to 365 when extended else 30)
-    const daysParam = wantExtended ? 365 : 30;
-    const ohlc = await axios.get(`https://api.coingecko.com/api/v3/coins/${id}/ohlc`, {
-      params: { vs_currency: 'usd', days: daysParam }
-    });
-    if (Array.isArray(ohlc.data) && ohlc.data.length) {
-      const closes: number[] = [];
-      const highs: number[] = [];
-      const lows: number[] = [];
-      ohlc.data.forEach((row: any) => {
-        const [, , high, low, close] = row; // [t, open, high, low, close]
-        highs.push(high);
-        lows.push(low);
-        closes.push(close);
-      });
-      return { closes, highs, lows };
-    }
-  } catch (e) {
-    console.warn('OHLC fetch failed, fallback to market_chart', e instanceof Error ? e.message : e);
+  const isDaily = timeframe === '1D';
+  // Use market_chart with appropriate interval for intraday freshness
+  const useHourly = timeframe === '1H' || timeframe === '4H';
+  const useMinutely = timeframe === '1m' || timeframe === '5m' || timeframe === '15m' || timeframe === '30m';
+  let params: any;
+  if (isDaily) {
+    params = { vs_currency: 'usd', days: '400', interval: 'daily' };
+  } else if (useHourly) {
+    params = { vs_currency: 'usd', days: '14', interval: 'hourly' };
+  } else if (useMinutely) {
+    // minutely only available when days <= 1
+    params = { vs_currency: 'usd', days: '1', interval: 'minutely' };
+  } else {
+    params = { vs_currency: 'usd', days: '30', interval: 'hourly' };
   }
-  // Fallback to market_chart close-only (supports arbitrary days up to ~max)
-  const days = timeframe === '1D' ? '400' : '30';
-  const response = await axios.get(`https://api.coingecko.com/api/v3/coins/${id}/market_chart`, {
-    params: { vs_currency: 'usd', days, interval: 'daily' }
-  });
-  if (!response.data?.prices) throw new Error('No price data received from CoinGecko');
-  const closes = response.data.prices.map((p: [number, number]) => p[1]);
-  return { closes };
+  const response = await axios.get(`https://api.coingecko.com/api/v3/coins/${id}/market_chart`, { params });
+  const prices = response.data?.prices as Array<[number, number]> | undefined;
+  if (!(prices?.length)) throw new Error('No price data received from CoinGecko');
+  const closesRaw = prices.map((p) => p[1]);
+  // Downsample for 4H from hourly
+  if (timeframe === '4H') {
+    const ds: number[] = [];
+    for (let i = 0; i < closesRaw.length; i += 4) ds.push(closesRaw[Math.min(i + 3, closesRaw.length - 1)]);
+    return { closes: ds };
+  }
+  return { closes: closesRaw };
 }
 
 /**
- * Fetch historical forex data from Alpha Vantage
+ * Fetch historical forex data using a sequential provider strategy with low complexity.
  */
 async function fetchForexHistoricalData(pair: string, timeframe: string): Promise<PriceSeries> {
-  console.log('Fetching forex data for:', pair);
   const [fromSym, toSym] = pair.split('/');
-  // Use full output when daily timeframe to obtain >200 bars for SMA200
-  const wantExtended = timeframe === '1D';
-  try {
-    const response = await axios.get('https://www.alphavantage.co/query', {
-      params: { function: 'FX_DAILY', from_symbol: fromSym, to_symbol: toSym, apikey: process.env.ALPHA_VANTAGE_API_KEY || '', outputsize: wantExtended ? 'full' : 'compact' }
-    });
-    const ts = response.data?.['Time Series (FX)'];
-    if (!ts) throw new Error('No forex data received from Alpha Vantage');
-    const rawEntries = Object.values(ts);
-    const entries: { [k: string]: string }[] = rawEntries.map(e => e as { [k: string]: string });
-    // Keep last N (ensure at least 400 if extended available)
-    const sliceCount = wantExtended ? 400 : 60;
-    const sliced = entries.slice(0, sliceCount);
-    const closes: number[] = []; const highs: number[] = []; const lows: number[] = [];
-    sliced.forEach(d => { closes.push(parseFloat(d['4. close'])); highs.push(parseFloat(d['2. high'])); lows.push(parseFloat(d['3. low'])); });
-    const revCloses = [...closes].reverse();
-    const revHighs = [...highs].reverse();
-    const revLows = [...lows].reverse();
-    if (!revCloses.length || !Number.isFinite(revCloses[revCloses.length - 1])) throw new Error('Alpha Vantage returned empty/invalid closes');
-    return { closes: revCloses, highs: revHighs, lows: revLows };
-  } catch (e) {
-    console.warn('Alpha Vantage FX_DAILY failed, using exchangerate.host timeseries', e instanceof Error ? e.message : e);
+  const apikey = process.env.ALPHA_VANTAGE_API_KEY || '';
+
+  // Build provider fetchers in priority order
+  const providers: Array<() => Promise<PriceSeries | null>> = [
+    // Alpha Vantage intraday (for intraday timeframes)
+    async () => {
+      const mapTfToAV: Record<string, string> = { '1m': '1min', '5m': '5min', '15m': '15min', '30m': '30min', '1H': '60min', '4H': '60min' };
+      const isDaily = timeframe === '1D';
+      const interval = mapTfToAV[timeframe];
+      if (!apikey || isDaily || !interval) return null;
+      const closes = await fetchFxIntradayAlpha(fromSym, toSym, interval, apikey);
+      if (!closes?.length) return null;
+      return { closes: timeframe === '4H' ? downsampleFor4H(closes) : closes };
+    },
+    // Alpha Vantage daily
+    async () => {
+      const closes = await fetchFxDailyAlpha(fromSym, toSym, apikey);
+      return closes?.length ? { closes } : null;
+    },
+    // Yahoo Finance chart
+    async () => {
+      const isDaily = timeframe === '1D';
+      const symbol = `${fromSym}${toSym}=X`;
+      const closes = await fetchFxYahooCloses(symbol, timeframe, isDaily);
+      if (!closes?.length) return null;
+      return { closes: timeframe === '4H' ? downsampleFor4H(closes) : closes };
+    },
+    // Exchangerate.host timeseries (daily)
+    async () => {
+      try { return await fetchForexTimeseriesFallback(pair); } catch { return null; }
+    },
+  ];
+
+  for (const p of providers) {
     try {
-      return await fetchForexTimeseriesFallback(pair);
-    } catch (e2) {
-      console.warn('Timeseries fallback failed, using synthetic series', e2 instanceof Error ? e2.message : e2);
-      // Generate synthetic close data as a last resort (60 points, ~30 min)
-      const basePrice = 1.1;
-      const closes = Array.from({ length: 60 }, (_, i) => basePrice + Math.sin(i / 6) * 0.01 + (Math.random() - 0.5) * 0.002);
-      return { closes };
+      const series = await p();
+      if (series?.closes?.length) return series;
+    } catch {
+      // continue to next provider
     }
   }
+  // Synthetic last resort
+  const basePrice = 1.1;
+  const closes = Array.from({ length: 120 }, (_, i) => basePrice + Math.sin(i / 6) * 0.01 + (Math.random() - 0.5) * 0.002);
+  return { closes };
 }
 
 /**
@@ -228,8 +235,11 @@ async function fetchHistoricalData(pair: string, timeframe: string = '1H'): Prom
   const key = cacheKey(pair, timeframe);
   const now = Date.now();
   const cached = memoryCache[key];
-  // Longer cache for daily extended data (30 min) vs intraday (5 min)
-  const ttl = timeframe === '1D' ? 1000 * 60 * 30 : 1000 * 60 * 5;
+  // Cache TTL by timeframe: shorter for intraday, longer for daily
+  let ttl: number;
+  if (timeframe === '1D') ttl = 1000 * 60 * 30;
+  else if (timeframe === '4H') ttl = 1000 * 60 * 2;
+  else ttl = 1000 * 60; // 1m..1H -> 60s
   if (cached && now - cached.ts < ttl) {
     return { closes: cached.data };
   }
@@ -401,16 +411,85 @@ export function computeLevels(
   return { entry, sl, tp };
 }
 
+// --- FX historical fetch helpers (top-level) ---
+async function fetchFxIntradayAlpha(fromSym: string, toSym: string, interval: string, apikey: string): Promise<number[] | null> {
+  const response = await axios.get('https://www.alphavantage.co/query', {
+    params: { function: 'FX_INTRADAY', from_symbol: fromSym, to_symbol: toSym, interval, apikey, outputsize: 'compact' }
+  });
+  const key = `Time Series FX (${interval})`;
+  const ts = response.data?.[key];
+  if (!ts) return null;
+  const entries = Object.values(ts);
+  const sliced = (entries as Array<Record<string, string>>).slice(0, 300);
+  const closes: number[] = [];
+  sliced.forEach((d: Record<string, string>) => { closes.push(parseFloat(d['4. close'])); });
+  return closes.reverse();
+}
+
+async function fetchFxDailyAlpha(fromSym: string, toSym: string, apikey: string): Promise<number[] | null> {
+  const response = await axios.get('https://www.alphavantage.co/query', {
+    params: { function: 'FX_DAILY', from_symbol: fromSym, to_symbol: toSym, apikey, outputsize: 'full' }
+  });
+  const ts = response.data?.['Time Series (FX)'];
+  if (!ts) return null;
+  return Object.values(ts).map((d: any) => parseFloat(d['4. close'])).reverse();
+}
+
+async function fetchFxYahooCloses(symbol: string, timeframe: string, isDaily: boolean): Promise<number[] | null> {
+  let yfInterval = '60m';
+  if (timeframe === '1m') yfInterval = '1m';
+  else if (timeframe === '5m') yfInterval = '5m';
+  else if (timeframe === '15m') yfInterval = '15m';
+  else if (timeframe === '30m') yfInterval = '30m';
+  let range = '5d';
+  if (isDaily) range = '1y';
+  else if (timeframe === '1H' || timeframe === '4H') range = '1mo';
+  const res = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}`, {
+    params: { interval: isDaily ? '1d' : yfInterval, range }
+  });
+  const closes = res.data?.chart?.result?.[0]?.indicators?.quote?.[0]?.close as number[] | undefined;
+  if (!(closes?.length)) return null;
+  return closes;
+}
+
+// Utility to downsample hourly closes to 4H blocks by taking the last close of each 4-period block
+function downsampleFor4H(closes: number[], factor = 4): number[] {
+  if (!Array.isArray(closes) || closes.length === 0) return closes;
+  const out: number[] = [];
+  for (let i = 0; i < closes.length; i += factor) {
+    out.push(closes[Math.min(i + factor - 1, closes.length - 1)]);
+  }
+  return out;
+}
 function buildPoiExplanation(
-  demandZone: { low: number; high: number } | undefined,
-  supplyZone: { low: number; high: number } | undefined,
-  fibs: number[]
-) {
-  const poiNotes: string[] = [];
-  if (demandZone) poiNotes.push(`Demand ${demandZone.low.toFixed(4)}–${demandZone.high.toFixed(4)}`);
-  if (supplyZone) poiNotes.push(`Supply ${supplyZone.low.toFixed(4)}–${supplyZone.high.toFixed(4)}`);
-  if (fibs.length) poiNotes.push(`Fib ${fibs.map(f => f.toFixed(4)).join(', ')}`);
-  return poiNotes.join(' | ');
+  demandZone?: { low: number; high: number },
+  supplyZone?: { low: number; high: number },
+  fibs: number[] = []
+): string {
+  const parts: string[] = [];
+  if (demandZone) parts.push(`Demand ${demandZone.low.toFixed(4)}-${demandZone.high.toFixed(4)}`);
+  if (supplyZone) parts.push(`Supply ${supplyZone.low.toFixed(4)}-${supplyZone.high.toFixed(4)}`);
+  if (fibs?.length) parts.push(`Fibs ${fibs.slice(-3).map(f => f.toFixed(4)).join(',')}`);
+  return parts.join(' | ') || 'No POIs';
+}
+function formatMACD(hist?: number) {
+  if (hist == null || !Number.isFinite(hist)) return 'MACD n/a';
+  let bias = 'flat';
+  if (hist > 0) bias = 'bullish';
+  else if (hist < 0) bias = 'bearish';
+  return `MACD hist ${hist.toFixed(3)} (${bias})`;
+}
+
+function calcVolatility(closes: number[]): number {
+  if (!closes.length) return 0;
+  const n = Math.min(50, closes.length - 1);
+  if (n <= 1) return 0;
+  const slice = closes.slice(-n);
+  const deltas: number[] = [];
+  for (let i = 1; i < slice.length; i++) deltas.push(Math.abs(slice[i] - slice[i - 1]));
+  const mean = deltas.reduce((a, b) => a + b, 0) / deltas.length;
+  const variance = deltas.reduce((a, b) => a + (b - mean) * (b - mean), 0) / deltas.length;
+  return Math.sqrt(variance);
 }
 
 function getFundBias(score: number): DirectionBias {
@@ -418,65 +497,13 @@ function getFundBias(score: number): DirectionBias {
   if (score < 45) return 'bear';
   return 'neutral';
 }
-function getTechBias(type: SignalType): DirectionBias {
-  if (type === 'Buy') return 'bull';
-  if (type === 'Sell') return 'bear';
+function getTechBias(t: SignalType): DirectionBias {
+  if (t === 'Buy') return 'bull';
+  if (t === 'Sell') return 'bear';
   return 'neutral';
 }
 
-/**
- * Calculate volatility as average price change
- */
-function calcVolatility(closes: number[]): number {
-  if (closes.length < 2) return 0;
-  let sum = 0;
-  for (let i = 1; i < closes.length; i++) {
-    sum += Math.abs(closes[i] - closes[i-1]);
-  }
-  return sum / (closes.length - 1);
-}
-
-function formatRSI(lastRSI?: number): string {
-  if (lastRSI == null) return 'RSI n/a';
-  let state: string;
-  if (lastRSI < 30) state = 'Oversold'; else if (lastRSI > 70) state = 'Overbought'; else state = 'Neutral';
-  return `RSI ${lastRSI.toFixed(1)} (${state})`;
-}
-function formatMACD(macdHist?: number): string {
-  if (macdHist == null) return 'MACD n/a';
-  let state: string;
-  if (macdHist > 0) state = 'Bullish momentum'; else if (macdHist < 0) state = 'Bearish momentum'; else state = 'Flat';
-  return `MACD Histogram ${macdHist.toFixed(2)} (${state})`;
-}
-function buildSections(base: {
-  type: SignalType; lastClose: number; lastSMA: number; sma200: number; ema20?: number; ema50?: number; lastRSI?: number; macdHist?: number; fundamentalsScore?: number; fundamentalsFactors?: string[]; volatilityPct?: number; riskReward?: number; riskCategory?: string;
-}) {
-  const confidenceDescriptor = base.fundamentalsScore != null ? 'w/ fundamentals' : 'technical only';
-  const overview = [
-    `Signal: ${base.type}`,
-    `Price ${base.lastClose.toFixed(4)}`,
-    `Confidence derived from blended technical (${confidenceDescriptor})`,
-  ];
-  const emaLine = (base.ema20 && base.ema50) ? `EMA20 ${base.ema20.toFixed(2)} / EMA50 ${base.ema50.toFixed(2)}` : 'EMAs insufficient data';
-  const technical = [
-    `SMA50 ${base.lastSMA.toFixed(2)} | SMA200 ${base.sma200.toFixed(2)}`,
-    emaLine,
-    formatRSI(base.lastRSI),
-    formatMACD(base.macdHist),
-  ];
-  const fundamentals = base.fundamentalsFactors && base.fundamentalsFactors.length > 0 ? base.fundamentalsFactors : ['Fundamentals unavailable'];
-  const risk = [
-    base.volatilityPct != null ? `Volatility ${base.volatilityPct.toFixed(2)}%` : 'Volatility n/a',
-    base.riskCategory ? `Risk category ${base.riskCategory}` : 'Risk category n/a',
-    base.riskReward != null ? `Risk/Reward ${base.riskReward.toFixed(2)}` : 'R/R n/a'
-  ];
-  return [
-    { title: 'Overview', details: overview },
-    { title: 'Technical', details: technical },
-    { title: 'Fundamentals', details: fundamentals },
-    { title: 'Risk', details: risk }
-  ];
-}
+// Build a structured explanation object for UI and a concise flat string
 function generateStructuredExplanation(input: {
   type: SignalType;
   lastClose: number;
@@ -484,40 +511,69 @@ function generateStructuredExplanation(input: {
   sma200: number;
   ema20?: number;
   ema50?: number;
-  lastRSI?: number;
+  lastRSI: number;
   macdHist?: number;
-  fundamentalsScore?: number;
-  fundamentalsFactors?: string[];
-  volatilityPct?: number;
-  riskReward?: number;
-  riskCategory?: string;
-}) {
-  const sections = buildSections(input);
-  const flatExplanation = sections.map(s => `${s.title}: ${s.details.join('; ')}`).join(' | ');
-  return { sections, flatExplanation };
-}
+  fundamentalsScore: number;
+  fundamentalsFactors: string[];
+  volatilityPct: number;
+  riskReward: number;
+  riskCategory: RiskCategory;
+}): { flatExplanation: string; sections: { title: string; details: string[] }[] } {
+  const {
+    type,
+    lastClose,
+    lastSMA,
+    sma200,
+    ema20,
+    ema50,
+    lastRSI,
+    macdHist,
+    fundamentalsScore,
+    fundamentalsFactors,
+    volatilityPct,
+    riskReward,
+    riskCategory,
+  } = input;
 
-/**
- * Fetches historical close prices and computes a trading signal
- */
+  const trend: string[] = [];
+  trend.push(`Price ${lastClose.toFixed(4)} vs SMA50 ${lastSMA.toFixed(4)}`);
+  trend.push(`SMA200 ${sma200.toFixed(4)} (${lastClose > sma200 ? 'above' : 'below'})`);
+  if (ema20 != null && ema50 != null) trend.push(`EMA20 ${ema20.toFixed(4)} vs EMA50 ${ema50.toFixed(4)}`);
+
+  let rsiState: 'oversold' | 'overbought' | 'neutral' = 'neutral';
+  if (lastRSI < 30) rsiState = 'oversold';
+  else if (lastRSI > 70) rsiState = 'overbought';
+  const momentum = [`RSI ${lastRSI.toFixed(1)} (${rsiState})`, formatMACD(macdHist)];
+
+  const fundHeader = `Fundamentals ${Math.round(fundamentalsScore)}/100`;
+  const fundDetails = fundamentalsFactors?.length ? fundamentalsFactors.slice(0, 4) : [];
+
+  const risk = [`Risk ${riskCategory}`, `Vol ${volatilityPct.toFixed(2)}%`, `RR ${riskReward.toFixed(2)}`];
+
+  const sections = [
+    { title: 'Signal', details: [`Type ${type}`] },
+    { title: 'Trend & MAs', details: trend },
+    { title: 'Momentum', details: momentum },
+    { title: 'Fundamentals', details: [fundHeader, ...fundDetails] },
+    { title: 'Risk', details: risk },
+  ];
+  const flatExplanation = [sections[0].details[0], trend[1], momentum[0], momentum[1], risk.join(', ')].filter(Boolean).join(' | ');
+  return { flatExplanation, sections };
+}
+/** Fetches historical close prices and computes a trading signal */
 export async function calculateSignal(pair: string, timeframe: string = '1H'): Promise<FullSignalResult> {
-  console.log('Calculating signal for:', pair, 'timeframe:', timeframe);
-  
-  // Fetch historical data (extended depth automatically handled inside for 1D timeframe)
+  // Fetch historical data
   const series = await fetchHistoricalData(pair, timeframe);
   const volatility = calcVolatility(series.closes);
   const { lastClose, lastRSI, lastSMA, sma200, ema20, ema50, atr, macd, macdSignal, macdHist } = calculateIndicators(series, timeframe);
-  
-  // Determine signal type and confidence
+  // Determine type
   const techType = determineSignalType(lastClose, lastSMA, lastRSI, macdHist);
-  // Trend momentum score
-  const trendUp = lastClose > (ema50 ?? lastSMA) ? 1 : 0;
   const above200 = lastClose > sma200 ? 1 : 0;
   const macdBias = macdBiasValue(macdHist);
   const macdScore = macdBiasScore(macdBias);
-  // Fetch fundamentals early for composite
-  const fundamentals = await fetchFundamentalData(pair);
+  const fundamentals = await fetchFundamentalData(pair, timeframe);
   const rsiNeutrality = 1 - Math.abs(50 - lastRSI) / 50;
+  const trendUp = lastClose > (ema50 ?? lastSMA) ? 1 : 0;
   const technicalComposite = (
     (trendUp * 0.25) +
     (above200 * 0.2) +
@@ -525,31 +581,23 @@ export async function calculateSignal(pair: string, timeframe: string = '1H'): P
     ((lastRSI < 30 || lastRSI > 70 ? 1 : rsiNeutrality) * 0.15) +
     (volatility > 0 ? Math.max(0, 1 - (volatility / lastClose) * 5) * 0.2 : 0)
   );
-  let confidence = Math.round(technicalComposite * 60 + fundamentals.score * 0.4); // blend fundamental influence
+  let confidence = Math.round(technicalComposite * 60 + fundamentals.score * 0.4);
   confidence = Math.max(0, Math.min(100, confidence));
   if (volatility > 0 && volatility / lastClose > 0.02) confidence = Math.max(0, confidence - 5);
   const { fibs, demandZone, supplyZone } = buildPOIs(series.closes, series.highs, series.lows);
   const isC = isCrypto(pair);
   const type = decideTypeWithPOI(techType, fundamentals.score, lastClose, atr, volatility, isC, { demandZone, supplyZone, fibs });
-
-  // Determine levels anchored to POIs and ATR
   const levels = computeLevels(type, lastClose, atr, volatility, isC, { demandZone, supplyZone });
   const riskReward = (levels.tp - levels.entry) / Math.max(1e-8, (levels.entry - levels.sl));
   const riskCategory = classifyRisk(volatility / lastClose);
   const volatilityPct = (volatility / lastClose) * 100;
   const compositeScore = Math.round(technicalComposite * 100);
-
-  // Fetch current price for display-calibrated rounding if provider available
   const currentPrice = await fetchCurrentPrice(pair, lastClose);
-  // If live price and historical close differ materially (e.g., fallback series),
-  // re-anchor levels around the live price to avoid mismatched scales in the UI.
   let displayLevels = levels;
   if (shouldReanchorLevels({ pair, isCrypto: isC, lastClose, currentPrice, atr, volatility })) {
     displayLevels = computeLevels(type, currentPrice, atr, volatility, isC, { demandZone, supplyZone });
   }
   const effectiveRiskReward = (displayLevels.tp - displayLevels.entry) / Math.max(1e-8, (displayLevels.entry - displayLevels.sl));
-
-  // Generate explanation
   const explanationData = generateStructuredExplanation({
     type,
     lastClose,
@@ -569,23 +617,22 @@ export async function calculateSignal(pair: string, timeframe: string = '1H'): P
     explanationData.flatExplanation,
     `POIs: ${buildPoiExplanation(demandZone, supplyZone, fibs)}`,
     displayLevels !== levels ? 'Anchored to live price' : undefined
-  ].join(' | ');
-
+  ].filter(Boolean).join(' | ');
   return {
     pair,
-    assetClass: isCrypto(pair) ? 'Crypto' : 'Forex',
+    assetClass: isC ? 'Crypto' : 'Forex',
     type,
     confidence,
     timeframe,
-  buyLevel: parseFloat((displayLevels.entry || currentPrice).toFixed(4)),
-  stopLoss: parseFloat(displayLevels.sl.toFixed(4)),
-  takeProfit: parseFloat(displayLevels.tp.toFixed(4)),
+    buyLevel: parseFloat((displayLevels.entry || currentPrice).toFixed(4)),
+    stopLoss: parseFloat(displayLevels.sl.toFixed(4)),
+    takeProfit: parseFloat(displayLevels.tp.toFixed(4)),
     explanation,
-  stale: false,
+    stale: false,
     news: fundamentals.news,
     indicators: { rsi: lastRSI, sma50: lastSMA, sma200, ema20, ema50, atr, macd, macdSignal, macdHist },
     fundamentals: { score: fundamentals.score, factors: fundamentals.factors },
-  riskReward: effectiveRiskReward,
+    riskReward: effectiveRiskReward,
     riskCategory,
     volatilityPct,
     compositeScore,

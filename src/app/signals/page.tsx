@@ -8,6 +8,7 @@ export const metadata: Metadata = {
 };
 
 export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 // Server component page; client composition moved to ClientLayout
 export default function SignalsPage() {

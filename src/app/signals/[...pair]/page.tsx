@@ -32,3 +32,7 @@ export default async function SignalDetailPage({ params, searchParams }: SignalD
     notFound();
   }
 }
+
+// Ensure this page is always rendered dynamically (SSR), not statically pre-rendered
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;

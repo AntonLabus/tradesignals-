@@ -56,24 +56,29 @@ export default function SignalsTable({ signals: initial, showInlineFilters = tru
 
   useEffect(() => {
     let aborted = false;
+    const controller = new AbortController();
     (async () => {
       try {
         setLoading(true);
-        const res = await fetch(`/api/signals`);
+        setError(null);
+        const tf = timeframeFilter !== 'All' ? `?timeframe=${encodeURIComponent(timeframeFilter)}` : '';
+        const res = await fetch(`/api/signals${tf}`, { signal: controller.signal });
         if (!res.ok) throw new Error(`Status ${res.status}`);
         const json = await res.json();
         if (!aborted) {
           setSignals(json.signals);
           onSignalsUpdate?.(json.signals);
         }
-      } catch (e: any) {
-        if (!aborted) setError(e.message || 'Failed');
+      } catch (e: unknown) {
+        const err = e as any;
+        const name: string | undefined = (err && typeof err === 'object' && 'name' in err) ? String(err.name) : undefined;
+        if (!aborted && name !== 'AbortError') setError((err?.message as string) || 'Failed');
       } finally {
         if (!aborted) setLoading(false);
       }
-    })();
-    return () => { aborted = true; };
-  }, [onSignalsUpdate]);
+    })().catch(() => { /* handled above */ });
+    return () => { aborted = true; controller.abort(); };
+  }, [onSignalsUpdate, timeframeFilter]);
 
   const timeframes = Array.from(new Set(signals.map((s) => s.timeframe)));
   const filtered = signals.filter(

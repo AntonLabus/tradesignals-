@@ -7,6 +7,17 @@ import { RSI, SMA, MACD, EMA, ATR } from 'technicalindicators';
 // Removed unused direct imports; fetchCurrentPrice will import lazily below
 import { fetchFundamentalData } from './fundamentals';
 
+// Config: live price anchoring threshold (ratio). If current price vs last close
+// differs by more than this ratio, we re-anchor computed levels to the live price.
+// Default is 1.2 (i.e., > 20% difference). Can be overridden via env var
+// LIVE_PRICE_ANCHOR_RATIO or NEXT_PUBLIC_LIVE_PRICE_ANCHOR_RATIO.
+const LIVE_PRICE_ANCHOR_RATIO: number = (() => {
+  const raw = process.env.LIVE_PRICE_ANCHOR_RATIO ?? process.env.NEXT_PUBLIC_LIVE_PRICE_ANCHOR_RATIO;
+  const n = raw ? Number(raw) : 1.2;
+  // Guardrails: require > 1.0 to make sense as a ratio, else fallback to default
+  return Number.isFinite(n) && n > 1.0 ? n : 1.2;
+})();
+
 // Type aliases (code quality / reuse)
 export type SignalType = 'Buy' | 'Sell' | 'Hold';
 export type RiskCategory = 'Low' | 'Medium' | 'High';
@@ -490,7 +501,7 @@ export async function calculateSignal(pair: string, timeframe: string = '1H'): P
     const minP = Math.min(currentPrice, lastClose);
     const maxP = Math.max(currentPrice, lastClose);
     const ratio = maxP / Math.max(1e-8, minP);
-    if (ratio > 1.2) {
+  if (ratio > LIVE_PRICE_ANCHOR_RATIO) {
   displayLevels = computeLevels(type, currentPrice, atr, volatility, isC, { demandZone, supplyZone });
     }
   }

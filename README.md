@@ -47,3 +47,10 @@ npm run lint
 ## Deployment
 
 This project is configured for deployment on Netlify. Ensure the build command is `npm run build` and the publish directory is `.next`.
+
+## Configuration
+
+- LIVE_PRICE_ANCHOR_RATIO (or NEXT_PUBLIC_LIVE_PRICE_ANCHOR_RATIO):
+	Controls when to re-anchor computed SL/TP levels to the current live price.
+	If the ratio between current price and last close exceeds this value, levels are re-anchored.
+	Default: `1.2` (20% difference). Must be greater than `1.0`.

@@ -284,13 +284,12 @@ async function fetchCryptoHistoricalData(pair: string, timeframe: string): Promi
   const series = await firstAvailable<PriceSeries>([
     () => fetchFromMarketChart(id, timeframe),
     () => fetchFromOHLC(id, timeframe),
-    async () => {
+  async () => {
       // Yahoo Finance chart fallback for crypto (e.g., BTCUSD, ETHUSD)
       try {
-        const base = pair.split('/')[0].toUpperCase();
-        const quote = (pair.split('/')[1] || 'USD').toUpperCase();
-        const symbol = `${base}-${quote}`; // for quote endpoint
-        const chartSymbol = `${base}${quote}=X`; // for chart endpoint style
+    const base = pair.split('/')[0].toUpperCase();
+    const quote = (pair.split('/')[1] || 'USD').toUpperCase();
+    const chartSymbol = `${base}-${quote}`; // Crypto uses dash format on Yahoo (e.g., ETH-USD)
         let yfInterval = '60m';
         if (timeframe === '1m') yfInterval = '1m';
         else if (timeframe === '5m') yfInterval = '5m';

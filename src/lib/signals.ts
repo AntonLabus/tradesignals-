@@ -27,8 +27,8 @@ const LIVE_PRICE_ANCHOR_ATR_MULTIPLIER: number = (() => {
 
 const LIVE_PRICE_ANCHOR_FX_PIPS: number = (() => {
   const raw = process.env.LIVE_PRICE_ANCHOR_FX_PIPS ?? process.env.NEXT_PUBLIC_LIVE_PRICE_ANCHOR_FX_PIPS;
-  const n = raw ? Number(raw) : 50; // default: 50 pips
-  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 50;
+  const n = raw ? Number(raw) : 10; // default: 10 pips (tighter anchoring for FX)
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 10;
 })();
 
 function isJpyPair(pair: string): boolean {
@@ -77,6 +77,10 @@ export interface FullSignalResult {
   type: SignalType;
   confidence: number;
   timeframe: string;
+  /** Server-side live price snapshot at calculation time */
+  currentPrice?: number;
+  /** Last historical close used for indicator calculations */
+  lastClose?: number;
   buyLevel: number;
   stopLoss: number;
   takeProfit: number;
@@ -125,6 +129,10 @@ function cacheKey(pair: string, tf: string) { return `${pair}:${tf}`; }
 // Determine a reasonable series length for a timeframe
 function seriesLengthFor(timeframe: string): number {
   return HISTORY_LOOKBACK[timeframe] || 120;
+}
+
+function isIntraday(timeframe: string): boolean {
+  return timeframe !== '1D';
 }
 
 // Generate a synthetic series centered around a live price (or a sane default)
@@ -780,7 +788,9 @@ export async function calculateSignal(pair: string, timeframe: string = '30m'): 
   const compositeScore = Math.round(technicalComposite * 100);
   const currentPrice = await fetchCurrentPrice(pair, lastClose);
   let displayLevels = levels;
-  if (shouldReanchorLevels({ pair, isCrypto: isC, lastClose, currentPrice, atr, volatility })) {
+  // For intraday timeframes, always anchor to the live price snapshot.
+  // For daily, re-anchor only when the difference exceeds configured thresholds.
+  if (isIntraday(timeframe) || shouldReanchorLevels({ pair, isCrypto: isC, lastClose, currentPrice, atr, volatility })) {
     displayLevels = computeLevels(type, currentPrice, atr, volatility, isC, { demandZone, supplyZone });
   }
   const effectiveRiskReward = (displayLevels.tp - displayLevels.entry) / Math.max(1e-8, (displayLevels.entry - displayLevels.sl));
@@ -814,6 +824,8 @@ export async function calculateSignal(pair: string, timeframe: string = '30m'): 
     type,
     confidence,
     timeframe,
+  currentPrice,
+  lastClose,
     buyLevel: parseFloat((displayLevels.entry || currentPrice).toFixed(4)),
     stopLoss: parseFloat(displayLevels.sl.toFixed(4)),
     takeProfit: parseFloat(displayLevels.tp.toFixed(4)),

@@ -170,6 +170,8 @@ export default function SignalDetailClient({ signal }: { readonly signal: FullSi
             <li>Type: <span className={`font-semibold ${typeColor}`}>{currentSignal.type}</span></li>
             <li>Confidence: {currentSignal.confidence}%</li>
             <li>Timeframe: {timeframe}</li>
+            <li>Current price: {currentSignal.currentPrice?.toFixed?.(4) ?? '—'}</li>
+            <li>Last close: {currentSignal.lastClose?.toFixed?.(4) ?? '—'}</li>
             <li>Buy: {currentSignal.buyLevel}</li>
             <li>Stop: {currentSignal.stopLoss}</li>
             <li>Target: {currentSignal.takeProfit}</li>

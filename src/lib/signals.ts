@@ -483,6 +483,18 @@ export async function calculateSignal(pair: string, timeframe: string = '1H'): P
 
   // Fetch current price for display-calibrated rounding if provider available
   const currentPrice = await fetchCurrentPrice(pair, lastClose);
+  // If live price and historical close differ materially (e.g., fallback series),
+  // re-anchor levels around the live price to avoid mismatched scales in the UI.
+  let displayLevels = levels;
+  if (Number.isFinite(currentPrice) && currentPrice > 0) {
+    const minP = Math.min(currentPrice, lastClose);
+    const maxP = Math.max(currentPrice, lastClose);
+    const ratio = maxP / Math.max(1e-8, minP);
+    if (ratio > 1.2) {
+  displayLevels = computeLevels(type, currentPrice, atr, volatility, isC, { demandZone, supplyZone });
+    }
+  }
+  const effectiveRiskReward = (displayLevels.tp - displayLevels.entry) / Math.max(1e-8, (displayLevels.entry - displayLevels.sl));
 
   // Generate explanation
   const explanationData = generateStructuredExplanation({
@@ -502,7 +514,8 @@ export async function calculateSignal(pair: string, timeframe: string = '1H'): P
   });
   const explanation = [
     explanationData.flatExplanation,
-    `POIs: ${buildPoiExplanation(demandZone, supplyZone, fibs)}`
+    `POIs: ${buildPoiExplanation(demandZone, supplyZone, fibs)}`,
+    displayLevels !== levels ? 'Anchored to live price' : undefined
   ].join(' | ');
 
   return {
@@ -511,15 +524,15 @@ export async function calculateSignal(pair: string, timeframe: string = '1H'): P
     type,
     confidence,
     timeframe,
-  buyLevel: parseFloat((levels.entry || currentPrice).toFixed(4)),
-  stopLoss: parseFloat(levels.sl.toFixed(4)),
-  takeProfit: parseFloat(levels.tp.toFixed(4)),
+  buyLevel: parseFloat((displayLevels.entry || currentPrice).toFixed(4)),
+  stopLoss: parseFloat(displayLevels.sl.toFixed(4)),
+  takeProfit: parseFloat(displayLevels.tp.toFixed(4)),
     explanation,
   stale: false,
     news: fundamentals.news,
     indicators: { rsi: lastRSI, sma50: lastSMA, sma200, ema20, ema50, atr, macd, macdSignal, macdHist },
     fundamentals: { score: fundamentals.score, factors: fundamentals.factors },
-    riskReward,
+  riskReward: effectiveRiskReward,
     riskCategory,
     volatilityPct,
     compositeScore,

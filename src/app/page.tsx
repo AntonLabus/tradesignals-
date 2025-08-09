@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Metadata } from 'next';
 import type { FullSignalResult } from '../lib/signals';
+import { getDefaultTimeframe } from '../lib/timeframes';
 
 export const metadata: Metadata = {
   title: 'Home · TradeSignals',
@@ -14,7 +15,8 @@ export default async function HomePage() {
   // Fetch current signals (default pairs) and surface active Buy/Sell
   let active: FullSignalResult[] = [];
   try {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL ?? ''}/api/signals?timeframe=1H&debug=1`, { cache: 'no-store', next: { revalidate: 0 } });
+  const defaultTf = getDefaultTimeframe();
+  const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL ?? ''}/api/signals?timeframe=${defaultTf}&debug=1`, { cache: 'no-store', next: { revalidate: 0 } });
     const json = await res.json();
     const signals = (json?.signals ?? []) as FullSignalResult[];
     active = signals.filter(s => s && (s.type === 'Buy' || s.type === 'Sell'))
@@ -87,11 +89,24 @@ export default async function HomePage() {
       {/* Roadmap */}
       <section className="glass p-6">
         <h3 className="text-2xl font-semibold">Roadmap</h3>
-        <ul className="list-disc list-inside mt-2 space-y-1 text-sm text-gray-300">
-          <li>Deeper macro ingestion (FOMC/ECB releases, CPI)</li>
-          <li>Pattern recognition & volatility filters</li>
-          <li>Watchlists, alerts, and backtests</li>
-        </ul>
+        <div className="mt-2 grid md:grid-cols-2 gap-3 text-sm">
+          <div>
+            <h5 className="font-semibold text-gray-200">Shipped</h5>
+            <ul className="list-disc list-inside mt-1 space-y-1 text-gray-300">
+              <li>Deeper macro ingestion (FOMC/ECB/CPI basics with tone scoring)</li>
+              <li>Pattern recognition & volatility filters (candlesticks + ATR proxy)</li>
+              <li>Watchlists, alerts, and backtests (UI + API)</li>
+            </ul>
+          </div>
+          <div>
+            <h5 className="font-semibold text-gray-200">Up next</h5>
+            <ul className="list-disc list-inside mt-1 space-y-1 text-gray-300">
+              <li>Deeper macro coverage (more sources, better weighting)</li>
+              <li>Alert channels (email/Webhook) and thresholds</li>
+              <li>Backtest parameter presets and result sharing</li>
+            </ul>
+          </div>
+        </div>
       </section>
     </div>
   );

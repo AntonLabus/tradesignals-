@@ -93,6 +93,7 @@ export interface FullSignalResult {
   technicalScore?: number; // 0-100 technical composite raw
   fundamentalScore?: number; // fundamentals raw
   explanationSections?: { title: string; details: string[] }[]; // structured explanation
+  debugSource?: string;
 }
 
 const TIMEFRAME_CONFIG: Record<string, { macdFast: number; macdSlow: number; macdSignal: number }> = {
@@ -116,7 +117,7 @@ const isCrypto = (pair: string): boolean => {
 
 const HISTORY_LOOKBACK: Record<string, number> = { '1m': 300, '5m': 300, '15m': 200, '30m': 180, '1H': 120, '4H': 90, '1D': 365 };
 
-interface PriceSeries { closes: number[]; highs?: number[]; lows?: number[]; }
+interface PriceSeries { closes: number[]; highs?: number[]; lows?: number[]; source?: string }
 
 // Reintroduce simple in-memory cache and fallback generator
 const memoryCache: Record<string, { ts: number; data: number[] }> = {};
@@ -142,7 +143,7 @@ async function fetchForexTimeseriesFallback(pair: string): Promise<PriceSeries> 
   const dates = Object.keys(rates).sort((a, b) => a.localeCompare(b));
   const closes = dates.map((d) => Number(rates[d]?.[toSym] ?? NaN)).filter((n) => Number.isFinite(n));
   if (!closes.length) throw new Error('exchangerate.host no numeric closes');
-  return { closes };
+  return { closes, source: 'exchangeratehost:timeseries' };
 }
 
 /**
@@ -181,9 +182,9 @@ async function fetchCryptoHistoricalData(pair: string, timeframe: string): Promi
     if (timeframe === '4H') {
       const ds: number[] = [];
       for (let i = 0; i < closesRaw.length; i += 4) ds.push(closesRaw[Math.min(i + 3, closesRaw.length - 1)]);
-      return { closes: ds };
+      return { closes: ds, source: `coingecko:market_chart:${params.interval || (isDaily ? 'daily' : 'hourly')}` };
     }
-    return { closes: closesRaw };
+    return { closes: closesRaw, source: `coingecko:market_chart:${params.interval || (isDaily ? 'daily' : 'hourly')}` };
   } catch (e) {
     // Fallback to OHLC endpoint if market_chart path fails or rate limited
     try {
@@ -202,9 +203,9 @@ async function fetchCryptoHistoricalData(pair: string, timeframe: string): Promi
           dsHigh.push(Math.max(...highs.slice(i, end + 1)));
           dsLow.push(Math.min(...lows.slice(i, end + 1)));
         }
-        return { closes: dsClose, highs: dsHigh, lows: dsLow };
+        return { closes: dsClose, highs: dsHigh, lows: dsLow, source: 'coingecko:ohlc' };
       }
-      return { closes, highs, lows };
+      return { closes, highs, lows, source: 'coingecko:ohlc' };
     } catch {
       throw e;
     }
@@ -228,12 +229,12 @@ async function fetchForexHistoricalData(pair: string, timeframe: string): Promis
       if (!apikey || isDaily || !interval) return null;
       const closes = await fetchFxIntradayAlpha(fromSym, toSym, interval, apikey);
       if (!closes?.length) return null;
-      return { closes: timeframe === '4H' ? downsampleFor4H(closes) : closes };
+      return { closes: timeframe === '4H' ? downsampleFor4H(closes) : closes, source: `alpha:intraday:${interval}` };
     },
     // Alpha Vantage daily
     async () => {
       const closes = await fetchFxDailyAlpha(fromSym, toSym, apikey);
-      return closes?.length ? { closes } : null;
+      return closes?.length ? { closes, source: 'alpha:daily' } : null;
     },
     // Yahoo Finance chart
     async () => {
@@ -241,7 +242,7 @@ async function fetchForexHistoricalData(pair: string, timeframe: string): Promis
       const symbol = `${fromSym}${toSym}=X`;
       const closes = await fetchFxYahooCloses(symbol, timeframe, isDaily);
       if (!closes?.length) return null;
-      return { closes: timeframe === '4H' ? downsampleFor4H(closes) : closes };
+      return { closes: timeframe === '4H' ? downsampleFor4H(closes) : closes, source: 'yahoo:chart' };
     },
     // Exchangerate.host timeseries (daily)
     async () => {
@@ -260,7 +261,7 @@ async function fetchForexHistoricalData(pair: string, timeframe: string): Promis
   // Synthetic last resort
   const basePrice = 1.1;
   const closes = Array.from({ length: 120 }, (_, i) => basePrice + Math.sin(i / 6) * 0.01 + (Math.random() - 0.5) * 0.002);
-  return { closes };
+  return { closes, source: 'synthetic' };
 }
 
 /**
@@ -675,6 +676,7 @@ export async function calculateSignal(pair: string, timeframe: string = '1H'): P
     technicalScore: Math.round(technicalComposite * 100),
     fundamentalScore: fundamentals.score,
     explanationSections: explanationData.sections,
+    debugSource: series.source,
   };
 }
 

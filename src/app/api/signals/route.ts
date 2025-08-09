@@ -126,5 +126,10 @@ export async function GET(req: Request) {
     results.push(...settled);
   }
 
-  return NextResponse.json({ signals: results, meta: { processed: results.length, elapsedMs: Date.now() - start } });
+  const debug = searchParams.get('debug') === '1';
+  const meta: any = { processed: results.length, elapsedMs: Date.now() - start };
+  if (debug) {
+    meta.sources = results.map(r => ({ pair: r.pair, src: (r as any).debugSource })).slice(0, 50);
+  }
+  return NextResponse.json({ signals: results, meta });
 }

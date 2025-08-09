@@ -160,7 +160,7 @@ function computePairAwareSentiment(pair: string, articles: any[]): { normalized:
 
 // Placeholder economic + fundamental scoring. In real implementation integrate
 // economic calendar (rates, CPI, NFP) & company / macro feeds.
-export async function fetchFundamentalData(pair: string, timeframe: string = '1H'): Promise<FundamentalData> {
+export async function fetchFundamentalData(pair: string, timeframe: string = '30m'): Promise<FundamentalData> {
   const now = Date.now();
   const baseScore = baseScoreForPair(pair);
   // Fresher fundamentals for intraday; longer for daily

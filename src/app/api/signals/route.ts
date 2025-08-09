@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { calculateSignal, FullSignalResult } from '../../../lib/signals';
+import { getDefaultTimeframe, sanitizeTimeframe } from '../../../lib/timeframes';
 
 // Simple in-memory cache with TTL to reduce external calls
 const cache: Record<string, { ts: number; data: FullSignalResult }> = {};
@@ -57,7 +58,7 @@ export async function GET(req: Request) {
   const start = Date.now();
   const { searchParams } = new URL(req.url);
   const pairsParam = searchParams.get('pairs') || DEFAULT_PAIRS.join(',');
-  const timeframe = searchParams.get('timeframe') || '1H';
+  const timeframe = sanitizeTimeframe(searchParams.get('timeframe'), getDefaultTimeframe());
   const pairs = pairsParam.split(',').map(p => p.trim()).filter(Boolean);
 
   const results: FullSignalResult[] = [];

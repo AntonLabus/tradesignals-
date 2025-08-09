@@ -1,4 +1,5 @@
 "use client";
+import { getDefaultTimeframe } from '../../lib/timeframes';
 
 // Client page uses only localStorage and polling; no need for route-level revalidate/dynamic exports.
 
@@ -15,7 +16,7 @@ export default function WatchlistPage() {
   useEffect(() => {
     const id = setInterval(async () => {
       try {
-        const params = new URLSearchParams({ timeframe: '1H' });
+  const params = new URLSearchParams({ timeframe: getDefaultTimeframe() });
         const res = await fetch(`/api/signals?${params}`);
         const json = await res.json();
         const signals = json?.signals || [];

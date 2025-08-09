@@ -10,7 +10,7 @@ describe('TimeframeSelector', () => {
     // Check that default option is rendered
     const select = screen.getByLabelText<HTMLSelectElement>(/Timeframe/i);
     expect(select).toBeInTheDocument();
-    expect(select.value).toBe('1H');
+  expect(select.value).toBe('30m');
 
     // Change selection to '15m'
     fireEvent.change(select, { target: { value: '15m' } });

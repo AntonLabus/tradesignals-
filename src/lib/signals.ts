@@ -739,7 +739,7 @@ function generateStructuredExplanation(input: {
   return { flatExplanation, sections };
 }
 /** Fetches historical close prices and computes a trading signal */
-export async function calculateSignal(pair: string, timeframe: string = '1H'): Promise<FullSignalResult> {
+export async function calculateSignal(pair: string, timeframe: string = '30m'): Promise<FullSignalResult> {
   // Fetch historical data
   const series = await fetchHistoricalData(pair, timeframe);
   const volatility = calcVolatility(series.closes);

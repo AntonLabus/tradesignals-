@@ -1,6 +1,7 @@
 import { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { calculateSignal, FullSignalResult } from '../../../lib/signals';
+import { getDefaultTimeframe, sanitizeTimeframe } from '../../../lib/timeframes';
 import SignalDetailClient from '../../../components/SignalDetailClient';
 
 export async function generateMetadata({ params }: { params: { pair: string[] } }): Promise<Metadata> {
@@ -23,7 +24,7 @@ export default async function SignalDetailPage({ params, searchParams }: SignalD
   const pair = quote ? `${decodeURIComponent(base)}/${decodeURIComponent(quote)}` : decodeURIComponent(base);
   if (!pair.includes('/')) notFound();
 
-  const timeframe = searchParams?.timeframe ?? '1H';
+  const timeframe = sanitizeTimeframe(searchParams?.timeframe, getDefaultTimeframe());
   try {
     const signal: FullSignalResult = await calculateSignal(pair, timeframe);
     return <SignalDetailClient signal={signal} />;

@@ -120,30 +120,57 @@ export interface BacktestResult {
   maxDrawdownPct: number;
 }
 
-export async function runTechnicalBacktest(pair: string, timeframe: string = '1H', initialCapital = 10000): Promise<BacktestResult> {
-  const closes = await fetchHistoricalCloses(pair, timeframe);
+// --- Types & small utilities (top-level) ---
+type Position = { side: 'long' | 'short'; entry: number } | null;
+type PositionEx = { side: 'long' | 'short'; entry: number; sl: number; tp: number; age?: number; be?: boolean; r: number };
+
+function alignSeries<T>(series: T[], total: number, fill: any): any[] {
+  const pad = total - series.length;
+  return pad > 0 ? new Array(pad).fill(fill).concat(series) : series.slice(-total);
+}
+
+function macdConfigFor(timeframe: string): { f: number; s: number; sig: number } {
+  const cfg: Record<string, { f: number; s: number; sig: number }> = {
+    '1m': { f: 5, s: 13, sig: 3 }, '5m': { f: 5, s: 13, sig: 3 }, '15m': { f: 8, s: 17, sig: 5 }, '30m': { f: 12, s: 26, sig: 9 },
+    '1H': { f: 12, s: 26, sig: 9 }, '4H': { f: 19, s: 39, sig: 9 }, '1D': { f: 12, s: 26, sig: 9 },
+  };
+  return cfg[timeframe] || cfg['1H'];
+}
+
+function getHTFFactor(tf: string): number {
+  const map: Record<string, number> = { '1m': 5, '5m': 3, '15m': 4, '30m': 8, '1H': 4, '4H': 6, '1D': 1 };
+  return map[tf] ?? 4;
+}
+
+function emaSlopeUp(vals: number[]): boolean { return vals.length >= 2 && vals[vals.length - 1] > vals[vals.length - 2]; }
+
+function computeHTFTrendUp(values: number[], tf: string): boolean {
+  const f = getHTFFactor(tf);
+  if (f <= 1) {
+    const e50 = EMA.calculate({ values, period: Math.min(50, values.length) });
+    return emaSlopeUp(e50);
+  }
+  const ds: number[] = [];
+  for (let i = 0; i < values.length; i += f) ds.push(values[Math.min(i + f - 1, values.length - 1)]);
+  const e50 = EMA.calculate({ values: ds, period: Math.min(50, ds.length) });
+  return emaSlopeUp(e50);
+}
+
+function computeAlignedIndicators(closes: number[], timeframe: string) {
   const n = closes.length;
-  // Indicators
   const rsi = RSI.calculate({ values: closes, period: 14 });
   const sma50 = SMA.calculate({ values: closes, period: 50 });
   const ema20 = EMA.calculate({ values: closes, period: 20 });
   const ema50 = EMA.calculate({ values: closes, period: 50 });
   const sma200 = SMA.calculate({ values: closes, period: Math.min(200, closes.length) });
+  const cfg = macdConfigFor(timeframe);
+  const mc = MACD.calculate({ values: closes, fastPeriod: cfg.f, slowPeriod: cfg.s, signalPeriod: cfg.sig, SimpleMAOscillator: false, SimpleMASignal: false });
   // ATR proxy from close-to-close absolute changes
   const atrPeriod = Number(process.env.NEXT_PUBLIC_BT_ATR_PERIOD ?? process.env.BT_ATR_PERIOD ?? 14);
   const diffs: number[] = [];
   for (let i = 1; i < closes.length; i++) diffs.push(Math.abs(closes[i] - closes[i - 1]));
   const atrProxy = SMA.calculate({ values: diffs, period: Math.max(2, Math.min(atrPeriod, Math.floor(n / 4))) });
-  const cfg: Record<string, { f: number; s: number; sig: number }> = {
-    '1m': { f: 5, s: 13, sig: 3 }, '5m': { f: 5, s: 13, sig: 3 }, '15m': { f: 8, s: 17, sig: 5 }, '30m': { f: 12, s: 26, sig: 9 },
-    '1H': { f: 12, s: 26, sig: 9 }, '4H': { f: 19, s: 39, sig: 9 }, '1D': { f: 12, s: 26, sig: 9 },
-  };
-  const mc = MACD.calculate({ values: closes, fastPeriod: (cfg[timeframe]||cfg['1H']).f, slowPeriod: (cfg[timeframe]||cfg['1H']).s, signalPeriod: (cfg[timeframe]||cfg['1H']).sig, SimpleMAOscillator: false, SimpleMASignal: false });
-  // Align indicator arrays to closes length
-  function alignSeries<T>(series: T[], total: number, fill: any): any[] {
-    const pad = total - series.length;
-    return pad > 0 ? new Array(pad).fill(fill).concat(series) : series.slice(-total);
-  }
+
   const rsiAligned = alignSeries<number>(rsi as any, n, NaN) as number[];
   const sma50Aligned = alignSeries<number>(sma50 as any, n, NaN) as number[];
   const ema20Aligned = alignSeries<number>(ema20 as any, n, NaN) as number[];
@@ -151,119 +178,149 @@ export async function runTechnicalBacktest(pair: string, timeframe: string = '1H
   const macdAligned = alignSeries<any>(mc as any, n, { histogram: NaN });
   const atrPxAligned = alignSeries<number>(atrProxy as any, n, NaN) as number[];
   const sma200Aligned = alignSeries<number>(sma200 as any, n, NaN) as number[];
-  const offset = Math.max(50, 20, (cfg[timeframe]||cfg['1H']).s + (cfg[timeframe]||cfg['1H']).sig);
-  // Conservative mode favors higher win-rate over trade frequency
-  const conservative = (process.env.NEXT_PUBLIC_BT_CONSERVATIVE === '1' || process.env.BT_CONSERVATIVE === '1');
-  function getHTFFactor(tf: string): number {
-    const map: Record<string, number> = { '1m': 5, '5m': 3, '15m': 4, '30m': 8, '1H': 4, '4H': 6, '1D': 1 };
-    return map[tf] ?? 4;
+  const offset = Math.max(50, 20, cfg.s + cfg.sig);
+  return { rsiAligned, sma50Aligned, ema20Aligned, ema50Aligned, macdAligned, atrPxAligned, sma200Aligned, offset };
+}
+
+function decideBuySell(ctx: { px: number; s: number; r: number; hist: number; e20: number; e50: number; s200: number; conservative: boolean; htfUp: boolean }) {
+  const { px, s, r, hist, e20, e50, s200, conservative, htfUp } = ctx;
+  const buy = conservative
+    ? (e20 > e50 && px > s && s > s200 && hist >= 0 && r >= 50 && htfUp)
+    : ((e20 > e50 && hist >= 0) || (px > s && r > 50));
+  const sell = conservative
+    ? (e20 < e50 && px < s && s < s200 && hist <= 0 && r <= 50 && !htfUp)
+    : ((e20 < e50 && hist <= 0) || (px < s && r < 50));
+  return { buy, sell };
+}
+
+function computeBarSignal(i: number, closes: number[], aligned: { rsiAligned: number[]; sma50Aligned: number[]; ema20Aligned: number[]; ema50Aligned: number[]; macdAligned: any[]; atrPxAligned: number[]; sma200Aligned: number[] }, conservative: boolean, htfUp: boolean) {
+  const px = closes[i];
+  const r = Number.isFinite(aligned.rsiAligned[i]) ? aligned.rsiAligned[i] : 50;
+  const s = Number.isFinite(aligned.sma50Aligned[i]) ? aligned.sma50Aligned[i] : px;
+  const hist = Number.isFinite(aligned.macdAligned[i]?.histogram) ? aligned.macdAligned[i].histogram : 0;
+  const e20 = Number.isFinite(aligned.ema20Aligned[i]) ? aligned.ema20Aligned[i] : s;
+  const e50 = Number.isFinite(aligned.ema50Aligned[i]) ? aligned.ema50Aligned[i] : s;
+  const s200 = Number.isFinite(aligned.sma200Aligned[i]) ? aligned.sma200Aligned[i] : s;
+  const atrPx = Number.isFinite(aligned.atrPxAligned[i]) ? aligned.atrPxAligned[i] : Math.abs(px - closes[Math.max(0, i - 1)]) * 0.75;
+  const { buy, sell } = decideBuySell({ px, s, r, hist, e20, e50, s200, conservative, htfUp });
+  return { px, r, s, hist, e20, e50, s200, atrPx, buy, sell };
+}
+
+function updateTrailingStop(pos: PositionEx, px: number, atrPx: number, mult: number) {
+  if (pos.side === 'long') {
+    const trail = px - mult * atrPx;
+    pos.sl = Math.max(pos.sl, trail);
+  } else {
+    const trail = px + mult * atrPx;
+    pos.sl = Math.min(pos.sl, trail);
   }
-  function emaSlopeUp(vals: number[]): boolean { return vals.length >= 2 && vals[vals.length - 1] > vals[vals.length - 2]; }
-  function emaSlopeDown(vals: number[]): boolean { return vals.length >= 2 && vals[vals.length - 1] < vals[vals.length - 2]; }
-  function computeHTFTrendUp(values: number[], tf: string): boolean {
-    const f = getHTFFactor(tf);
-    if (f <= 1) {
-      const e50 = EMA.calculate({ values, period: Math.min(50, values.length) });
-      return emaSlopeUp(e50);
-    }
-    const ds: number[] = [];
-    for (let i = 0; i < values.length; i += f) ds.push(values[Math.min(i + f - 1, values.length - 1)]);
-    const e50 = EMA.calculate({ values: ds, period: Math.min(50, ds.length) });
-    return emaSlopeUp(e50);
+}
+
+function closePosition(equity: number, side: 'long' | 'short', entry: number, px: number): { equity: number; win: boolean } {
+  const ret = side === 'long' ? (px - entry) / entry : (entry - px) / entry;
+  return { equity: equity * (1 + ret), win: ret > 0 };
+}
+
+function tryOppositeExit(pos: PositionEx | null, equity: number, sig: { px: number; buy: boolean; sell: boolean }): { position: PositionEx | null; equity: number; exited: boolean; win: boolean } {
+  if (!pos) return { position: pos, equity, exited: false, win: false };
+  if (pos.side === 'long' && sig.sell) {
+    const res = closePosition(equity, 'long', pos.entry, sig.px);
+    return { position: null, equity: res.equity, exited: true, win: res.win };
   }
-  const htfUp = computeHTFTrendUp(closes, timeframe);
-  const shouldBuy = (px: number, s: number, r: number, hist: number, e20: number, e50: number, s200: number) => (
-    conservative
-      ? (e20 > e50 && px > s && s > s200 && hist >= 0 && r >= 50 && htfUp)
-      : ((e20 > e50 && hist >= 0) || (px > s && r > 50))
-  );
-  const shouldSell = (px: number, s: number, r: number, hist: number, e20: number, e50: number, s200: number) => (
-    conservative
-      ? (e20 < e50 && px < s && s < s200 && hist <= 0 && r <= 50 && !htfUp)
-      : ((e20 < e50 && hist <= 0) || (px < s && r < 50))
-  );
-  function closePosition(equity: number, side: 'long' | 'short', entry: number, px: number): { equity: number; win: boolean } {
-    const ret = side === 'long' ? (px - entry) / entry : (entry - px) / entry;
-    return { equity: equity * (1 + ret), win: ret > 0 };
+  if (pos.side === 'short' && sig.buy) {
+    const res = closePosition(equity, 'short', pos.entry, sig.px);
+    return { position: null, equity: res.equity, exited: true, win: res.win };
   }
-  function computeSignalsAtIndex(i: number) {
-    const px = closes[i];
-    const r = Number.isFinite(rsiAligned[i]) ? rsiAligned[i] : 50;
-    const s = Number.isFinite(sma50Aligned[i]) ? sma50Aligned[i] : px;
-    const hist = Number.isFinite(macdAligned[i]?.histogram) ? macdAligned[i].histogram : 0;
-    const e20 = Number.isFinite(ema20Aligned[i]) ? ema20Aligned[i] : s;
-    const e50 = Number.isFinite(ema50Aligned[i]) ? ema50Aligned[i] : s;
-    const s200 = Number.isFinite(sma200Aligned[i]) ? sma200Aligned[i] : s;
-    const atrPx = Number.isFinite(atrPxAligned[i]) ? atrPxAligned[i] : Math.abs(px - closes[Math.max(0, i - 1)]) * 0.75;
-    return { px, r, s, hist, e20, e50, s200, atrPx, buy: shouldBuy(px, s, r, hist, e20, e50, s200), sell: shouldSell(px, s, r, hist, e20, e50, s200) };
+  return { position: pos, equity, exited: false, win: false };
+}
+
+function trySLTPExit(pos: PositionEx | null, equity: number, px: number): { position: PositionEx | null; equity: number; exited: boolean; win: boolean } {
+  if (!pos) return { position: pos, equity, exited: false, win: false };
+  if (pos.side === 'long' && (px <= pos.sl || px >= pos.tp)) {
+    const res = closePosition(equity, 'long', pos.entry, px);
+    return { position: null, equity: res.equity, exited: true, win: res.win };
   }
-  function updateTrailingStop(pos: PositionEx, px: number, atrPx: number, mult: number) {
-    if (pos.side === 'long') {
-      const trail = px - mult * atrPx;
-      pos.sl = Math.max(pos.sl, trail);
-    } else {
-      const trail = px + mult * atrPx;
-      pos.sl = Math.min(pos.sl, trail);
-    }
+  if (pos.side === 'short' && (px >= pos.sl || px <= pos.tp)) {
+    const res = closePosition(equity, 'short', pos.entry, px);
+    return { position: null, equity: res.equity, exited: true, win: res.win };
   }
-  function tryOppositeExit(pos: PositionEx | null, equity: number, sig: { px: number; buy: boolean; sell: boolean }): { position: PositionEx | null; equity: number; exited: boolean; win: boolean } {
-    if (!pos) return { position: pos, equity, exited: false, win: false };
-    if (pos.side === 'long' && sig.sell) {
-      const res = closePosition(equity, 'long', pos.entry, sig.px);
-      return { position: null, equity: res.equity, exited: true, win: res.win };
-    }
-    if (pos.side === 'short' && sig.buy) {
-      const res = closePosition(equity, 'short', pos.entry, sig.px);
-      return { position: null, equity: res.equity, exited: true, win: res.win };
-    }
-    return { position: pos, equity, exited: false, win: false };
+  return { position: pos, equity, exited: false, win: false };
+}
+
+function maybeEnter(position: PositionEx | null, sig: { px: number; buy: boolean; sell: boolean }, riskPct: number, rrTarget: number): { position: PositionEx | null; entered: boolean } {
+  if (position) return { position, entered: false };
+  if (sig.buy) {
+    return { position: { side: 'long', entry: sig.px, sl: sig.px * (1 - riskPct), tp: sig.px * (1 + riskPct * rrTarget), age: 0, be: false, r: sig.px * riskPct }, entered: true };
   }
-  function trySLTPExit(pos: PositionEx | null, equity: number, px: number): { position: PositionEx | null; equity: number; exited: boolean; win: boolean } {
-    if (!pos) return { position: pos, equity, exited: false, win: false };
-    if (pos.side === 'long' && (px <= pos.sl || px >= pos.tp)) {
-      const res = closePosition(equity, 'long', pos.entry, px);
-      return { position: null, equity: res.equity, exited: true, win: res.win };
-    }
-    if (pos.side === 'short' && (px >= pos.sl || px <= pos.tp)) {
-      const res = closePosition(equity, 'short', pos.entry, px);
-      return { position: null, equity: res.equity, exited: true, win: res.win };
-    }
-    return { position: pos, equity, exited: false, win: false };
+  if (sig.sell) {
+    return { position: { side: 'short', entry: sig.px, sl: sig.px * (1 + riskPct), tp: sig.px * (1 - riskPct * rrTarget), age: 0, be: false, r: sig.px * riskPct }, entered: true };
   }
-  function processEntryExit(state: { position: PositionEx | null; equity: number; trades: number; wins: number }, sig: { px: number; buy: boolean; sell: boolean; atrPx: number }, riskPct: number, trailMult: number, rrTarget: number, beAt: number, maxBars: number): { position: PositionEx | null; equity: number; trades: number; wins: number } {
-    let { position, equity, trades, wins } = state;
-    // Entry
-    if (!position && sig.buy) { position = { side: 'long', entry: sig.px, sl: sig.px * (1 - riskPct), tp: sig.px * (1 + riskPct * rrTarget), age: 0, be: false, r: sig.px * riskPct }; trades++; return { position, equity, trades, wins }; }
-    if (!position && sig.sell) { position = { side: 'short', entry: sig.px, sl: sig.px * (1 + riskPct), tp: sig.px * (1 - riskPct * rrTarget), age: 0, be: false, r: sig.px * riskPct }; trades++; return { position, equity, trades, wins }; }
-    if (position) {
-      updateTrailingStop(position, sig.px, sig.atrPx, trailMult);
-      // Move to breakeven once price moves by beAt * R in our favor
-      if (!position.be) {
-        if (position.side === 'long' && sig.px - position.entry >= position.r * beAt) { position.sl = Math.max(position.sl, position.entry); position.be = true; }
-        if (position.side === 'short' && position.entry - sig.px >= position.r * beAt) { position.sl = Math.min(position.sl, position.entry); position.be = true; }
-      }
-      const opp = tryOppositeExit(position, equity, sig);
-      if (opp.exited) {
-        if (opp.win) wins++;
-        return { position: opp.position, equity: opp.equity, trades, wins };
-      }
-      const cut = trySLTPExit(position, equity, sig.px);
-      if (cut.exited) {
-        if (cut.win) wins++;
-        return { position: cut.position, equity: cut.equity, trades, wins };
-      }
-      // Max bars in trade
-      position.age = (position.age ?? 0) + 1;
-      if (position.age >= maxBars) {
-        const res = closePosition(equity, position.side, position.entry, sig.px);
-        if (res.win) wins++;
-        return { position: null, equity: res.equity, trades, wins };
-      }
-    }
+  return { position, entered: false };
+}
+
+function applyBreakevenIfNeeded(pos: PositionEx, px: number, beAt: number) {
+  if (pos.be) {
+    return;
+  }
+  if (pos.side === 'long' && px - pos.entry >= pos.r * beAt) {
+    pos.sl = Math.max(pos.sl, pos.entry);
+    pos.be = true;
+  }
+  if (pos.side === 'short' && pos.entry - px >= pos.r * beAt) {
+    pos.sl = Math.min(pos.sl, pos.entry);
+    pos.be = true;
+  }
+}
+
+function checkMaxBarsExit(pos: PositionEx, equity: number, px: number, maxBars: number): { position: PositionEx | null; equity: number; exited: boolean; win: boolean } {
+  pos.age = (pos.age ?? 0) + 1;
+  if (pos.age >= maxBars) {
+    const res = closePosition(equity, pos.side, pos.entry, px);
+    return { position: null, equity: res.equity, exited: true, win: res.win };
+  }
+  return { position: pos, equity, exited: false, win: false };
+}
+
+function processEntryExit(state: { position: PositionEx | null; equity: number; trades: number; wins: number }, sig: { px: number; buy: boolean; sell: boolean; atrPx: number }, riskPct: number, trailMult: number, rrTarget: number, beAt: number, maxBars: number): { position: PositionEx | null; equity: number; trades: number; wins: number } {
+  let { position, equity, trades, wins } = state;
+  // Try entry
+  const enter = maybeEnter(position, sig, riskPct, rrTarget);
+  if (enter.entered) {
+    trades++;
+    return { position: enter.position, equity, trades, wins };
+  }
+  position = enter.position;
+  if (!position) {
     return { position, equity, trades, wins };
   }
-  type Position = { side: 'long' | 'short'; entry: number } | null;
-  type PositionEx = { side: 'long' | 'short'; entry: number; sl: number; tp: number; age?: number; be?: boolean; r: number };
+  // Manage open position
+  updateTrailingStop(position, sig.px, sig.atrPx, trailMult);
+  applyBreakevenIfNeeded(position, sig.px, beAt);
+  const opp = tryOppositeExit(position, equity, sig);
+  if (opp.exited) {
+    if (opp.win) wins++;
+    return { position: opp.position, equity: opp.equity, trades, wins };
+  }
+  const cut = trySLTPExit(position, equity, sig.px);
+  if (cut.exited) {
+    if (cut.win) wins++;
+    return { position: cut.position, equity: cut.equity, trades, wins };
+  }
+  const aged = checkMaxBarsExit(position, equity, sig.px, maxBars);
+  if (aged.exited) {
+    if (aged.win) wins++;
+    return { position: aged.position, equity: aged.equity, trades, wins };
+  }
+  return { position, equity, trades, wins };
+}
+
+export async function runTechnicalBacktest(pair: string, timeframe: string = '30m', initialCapital = 10000): Promise<BacktestResult> {
+  const closes = await fetchHistoricalCloses(pair, timeframe);
+  const n = closes.length;
+  const aligned = computeAlignedIndicators(closes, timeframe);
+  const conservative = (process.env.NEXT_PUBLIC_BT_CONSERVATIVE === '1' || process.env.BT_CONSERVATIVE === '1');
+  const htfUp = computeHTFTrendUp(closes, timeframe);
+
   let position: PositionEx | null = null;
   let equity = initialCapital;
   const equityCurve: number[] = [];
@@ -273,8 +330,9 @@ export async function runTechnicalBacktest(pair: string, timeframe: string = '1H
   const rrTarget = Number(process.env.NEXT_PUBLIC_BT_RR ?? process.env.BT_RR ?? (conservative ? 1.0 : 2.0));
   const beAt = Number(process.env.NEXT_PUBLIC_BT_BE_AT ?? process.env.BT_BE_AT ?? 0.5);
   const maxBars = Number(process.env.NEXT_PUBLIC_BT_MAX_BARS ?? process.env.BT_MAX_BARS ?? 120);
-  for (let i = offset; i < n; i++) {
-    const sig = computeSignalsAtIndex(i);
+
+  for (let i = aligned.offset; i < n; i++) {
+    const sig = computeBarSignal(i, closes, aligned, conservative, htfUp);
     const state = processEntryExit({ position, equity, trades, wins }, sig, riskPct, trailMult, rrTarget, beAt, maxBars);
     position = state.position;
     equity = state.equity; trades = state.trades; wins = state.wins;
@@ -288,7 +346,7 @@ export async function runTechnicalBacktest(pair: string, timeframe: string = '1H
     position = null;
   }
   const totalReturnPct = ((equity / initialCapital) - 1) * 100;
-  function computeMetrics(curve: number[], start: number): number {
+  function computeMaxDrawdownPct(curve: number[], start: number): number {
     let peak = start, maxDD = 0;
     for (const e of curve) {
       if (e > peak) peak = e;
@@ -297,7 +355,7 @@ export async function runTechnicalBacktest(pair: string, timeframe: string = '1H
     }
     return maxDD * 100;
   }
-  const maxDrawdownPct = computeMetrics(equityCurve, initialCapital);
+  const maxDrawdownPct = computeMaxDrawdownPct(equityCurve, initialCapital);
   const winRate = trades ? (wins / trades) * 100 : 0;
   return { pair, timeframe, trades, wins, winRate, totalReturnPct, equityCurve, maxDrawdownPct };
 }

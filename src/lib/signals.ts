@@ -1,6 +1,6 @@
 import axios from 'axios';
-// Set sane axios defaults to avoid long hangs that can abort streamed responses
-axios.defaults.timeout = 8000; // 8s per request cap
+// Set axios defaults to keep provider fallbacks snappy
+axios.defaults.timeout = 3500; // 3.5s per request to bound sequential provider retries
 axios.defaults.maxRedirects = 0;
 
 import { RSI, SMA, MACD, EMA, ATR } from 'technicalindicators';

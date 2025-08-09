@@ -30,7 +30,7 @@ export default async function SignalDetailPage({ params, searchParams }: SignalD
   } catch (e) {
     console.error('SignalDetailPage error:', e instanceof Error ? e.message : e);
     // Graceful fallback instead of 404 so users see the page even if a data provider failed
-    const fallback: FullSignalResult = {
+  const fallback: FullSignalResult = {
       pair,
       assetClass: /^(BTC|ETH|SOL|XRP|ADA|DOGE|BNB|LTC|DOT|AVAX|LINK|MATIC|TRX|SHIB|BCH|XLM|NEAR|UNI)\//.test(pair) ? 'Crypto' : 'Forex',
       type: 'Hold',
@@ -39,7 +39,7 @@ export default async function SignalDetailPage({ params, searchParams }: SignalD
       buyLevel: 0,
       stopLoss: 0,
       takeProfit: 0,
-      explanation: 'Data temporarily unavailable',
+  explanation: 'Data temporarily unavailable (provider timeout or rate limit). Retry or change timeframe.',
       stale: true,
       news: [],
       indicators: { rsi: 0, sma50: 0, sma200: 0 },

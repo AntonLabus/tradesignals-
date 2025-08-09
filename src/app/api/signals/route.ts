@@ -22,9 +22,9 @@ const DEFAULT_PAIRS = [
 
 const CRYPTO_BASES = /^(BTC|ETH|SOL|XRP|ADA|DOGE|BNB|LTC|DOT|AVAX|LINK|MATIC|TRX|SHIB|BCH|XLM|NEAR|UNI)$/;
 // Tune batching/timeout to avoid initial cold-start fallbacks that show zeros
-const BATCH_SIZE = 4; // fewer concurrent calls to reduce provider throttling
-const PER_SIGNAL_TIMEOUT = 6000; // allow calc + one HTTP fallback path
-const GLOBAL_BUDGET = 20000; // enough for a couple of batches to complete
+const BATCH_SIZE = 3; // lower concurrency to reduce provider throttling further
+const PER_SIGNAL_TIMEOUT = 9000; // allow calc + two HTTP fallback paths
+const GLOBAL_BUDGET = 30000; // more time for a few batches to complete
 
 async function withTimeout<T>(p: Promise<T>, ms: number, onTimeout: () => T): Promise<T> {
   return new Promise<T>((resolve) => {
@@ -45,11 +45,11 @@ function fallbackSignal(pair: string, timeframe: string, reason: string, prior?:
   buyLevel: prior?.buyLevel ?? 0,
   stopLoss: prior?.stopLoss ?? 0,
   takeProfit: prior?.takeProfit ?? 0,
-    explanation: reason,
+  explanation: prior?.explanation ? `${prior.explanation} | ${reason}` : reason,
   stale: true,
-    news: [],
-    indicators: { rsi: 0, sma50: 0, sma200: 0 },
-    fundamentals: { score: 0, factors: [] },
+  news: prior?.news ?? [],
+  indicators: prior?.indicators ?? { rsi: 0, sma50: 0, sma200: 0 },
+  fundamentals: prior?.fundamentals ?? { score: 0, factors: [] },
   };
 }
 

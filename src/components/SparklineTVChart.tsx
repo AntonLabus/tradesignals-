@@ -14,6 +14,19 @@ const ClientOnlyTradingView = dynamic(
     return import('react-tradingview-widget').then((mod) => {
       const TradingViewWidget = mod.default;
       
+      function mapToTV(tf: string) {
+        switch (tf) {
+          case '1m': return '1';
+          case '5m': return '5';
+          case '15m': return '15';
+          case '30m': return '30';
+          case '1H': return '60';
+          case '4H': return '240';
+          case '1D': return 'D';
+          default: return '60';
+        }
+      }
+
       return function TradingViewChart({ symbol, timeframe }: { symbol: string; timeframe: string }) {
         return (
           <div style={{ width: 120, height: 60 }}>
@@ -22,7 +35,7 @@ const ClientOnlyTradingView = dynamic(
               autosize={false}
               width={120}
               height={60}
-              interval={timeframe}
+              interval={mapToTV(timeframe)}
               theme="dark"
             />
           </div>

@@ -29,6 +29,20 @@ export default function SignalDetailClient({ signal }: { readonly signal: FullSi
   const fundamentalScore = signal.fundamentals?.score ?? signal.fundamentalScore;
   const fundamentalScoreDisplay = fundamentalScore != null ? Math.round(fundamentalScore) : '—';
 
+  // Map UI timeframe to TradingView interval values
+  const tvInterval = (() => {
+    switch (timeframe) {
+      case '1m': return '1';
+      case '5m': return '5';
+      case '15m': return '15';
+      case '30m': return '30';
+      case '1H': return '60';
+      case '4H': return '240';
+      case '1D': return 'D';
+      default: return '60';
+    }
+  })();
+
   return (
     <div className="space-y-6">
       <h1 className="text-3xl font-bold">Signal for {signal.pair}</h1>
@@ -43,7 +57,7 @@ export default function SignalDetailClient({ signal }: { readonly signal: FullSi
           symbol={signal.pair.replace('/', '')}
           autosize
           theme="dark"
-          interval={timeframe}
+          interval={tvInterval}
         />
       </div>
 

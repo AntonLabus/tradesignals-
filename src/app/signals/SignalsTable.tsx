@@ -54,6 +54,27 @@ export default function SignalsTable({ signals: initial, showInlineFilters = tru
   const timeframeFilter = externalFilters?.timeframeFilter ?? timeframeFilterInternal;
   const setTimeframeFilter = externalFilters?.setTimeframeFilter ?? setTimeframeFilterInternal;
 
+  async function fetchAll(controller: AbortController) {
+    const res = await fetch(`/api/signals`, { signal: controller.signal });
+    if (!res.ok) throw new Error(`Status ${res.status}`);
+    return res.json();
+  }
+
+  async function fetchBatchesByTimeframe(pairs: string[], timeframe: string, controller: AbortController, onPartial: (partial: FullSignalResult[]) => void) {
+    const batchSize = 6;
+    const combined: FullSignalResult[] = [];
+    for (let i = 0; i < pairs.length; i += batchSize) {
+      const batch = pairs.slice(i, i + batchSize);
+      const url = `/api/signals?pairs=${encodeURIComponent(batch.join(','))}&timeframe=${encodeURIComponent(timeframe)}`;
+      const res = await fetch(url, { signal: controller.signal });
+      if (!res.ok) throw new Error(`Status ${res.status}`);
+      const json = await res.json();
+      combined.push(...(json.signals as FullSignalResult[]));
+      onPartial([...combined]);
+    }
+    return combined;
+  }
+
   useEffect(() => {
     let aborted = false;
     const controller = new AbortController();
@@ -61,13 +82,19 @@ export default function SignalsTable({ signals: initial, showInlineFilters = tru
       try {
         setLoading(true);
         setError(null);
-        const tf = timeframeFilter !== 'All' ? `?timeframe=${encodeURIComponent(timeframeFilter)}` : '';
-        const res = await fetch(`/api/signals${tf}`, { signal: controller.signal });
-        if (!res.ok) throw new Error(`Status ${res.status}`);
-        const json = await res.json();
-        if (!aborted) {
-          setSignals(json.signals);
-          onSignalsUpdate?.(json.signals);
+        // If a specific timeframe is selected, request in batches by pairs
+        if (timeframeFilter !== 'All' && signals.length > 0) {
+          const uniquePairs = Array.from(new Set(signals.map((s) => s.pair)));
+          const combined = await fetchBatchesByTimeframe(uniquePairs, timeframeFilter, controller, (partial) => {
+            if (!aborted) { setSignals(partial); onSignalsUpdate?.(partial); }
+          });
+          if (!aborted) { setSignals(combined); onSignalsUpdate?.(combined); }
+        } else {
+          const json = await fetchAll(controller);
+          if (!aborted) {
+            setSignals(json.signals);
+            onSignalsUpdate?.(json.signals);
+          }
         }
       } catch (e: unknown) {
         const err = e as any;

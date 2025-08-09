@@ -345,11 +345,11 @@ async function fetchHistoricalData(pair: string, timeframe: string = '1H'): Prom
   try {
     const series = isCrypto(pair) ? await fetchCryptoHistoricalData(pair, timeframe) : await fetchForexHistoricalData(pair, timeframe);
     const sliceLen = HISTORY_LOOKBACK[timeframe] || 120;
-    const closes = series.closes.slice(-sliceLen);
-    const highs = series.highs?.slice(-sliceLen);
-    const lows = series.lows?.slice(-sliceLen);
-    memoryCache[key] = { ts: now, data: series.closes }; // store full fetched closes for reuse
-    return { closes, highs, lows };
+  const closes = series.closes.slice(-sliceLen);
+  const highs = series.highs?.slice(-sliceLen);
+  const lows = series.lows?.slice(-sliceLen);
+  memoryCache[key] = { ts: now, data: series.closes }; // store full fetched closes for reuse
+  return { closes, highs, lows, source: series.source };
   } catch (e) {
     console.error('Historical fetch failed, using synthetic series', e instanceof Error ? e.message : e);
     const synthetic = await syntheticSeriesFromLive(pair, timeframe);
@@ -721,7 +721,8 @@ export async function calculateSignal(pair: string, timeframe: string = '1H'): P
   const explanation = [
     explanationData.flatExplanation,
     `POIs: ${buildPoiExplanation(demandZone, supplyZone, fibs)}`,
-    displayLevels !== levels ? 'Anchored to live price' : undefined
+    displayLevels !== levels ? 'Anchored to live price' : undefined,
+    series.source ? `src:${series.source}` : undefined
   ].filter(Boolean).join(' | ');
   return {
     pair,

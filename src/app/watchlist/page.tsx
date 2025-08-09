@@ -1,7 +1,6 @@
 "use client";
 
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
+// Client page uses only localStorage and polling; no need for route-level revalidate/dynamic exports.
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';

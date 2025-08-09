@@ -20,6 +20,28 @@ import TimeframeSelector from './TimeframeSelector';
 export interface NewsItem { title: string; url: string; }
 export interface SignalData extends FullSignalResult {}
 
+// Tiny equity sparkline rendered as inline SVG
+function EquitySparkline({ values }: Readonly<{ values: number[] }>) {
+  if (!values || values.length < 2) return null;
+  const width = 160;
+  const height = 40;
+  // Downsample to at most 80 points for simplicity
+  const step = Math.max(1, Math.floor(values.length / 80));
+  const pts = values.filter((_, i) => i % step === 0);
+  const min = Math.min(...pts);
+  const max = Math.max(...pts);
+  const range = max - min || 1;
+  const toX = (i: number) => (i / (pts.length - 1)) * width;
+  const toY = (v: number) => height - ((v - min) / range) * height;
+  const d = pts.map((v, i) => `${i === 0 ? 'M' : 'L'} ${toX(i).toFixed(2)} ${toY(v).toFixed(2)}`).join(' ');
+  const lastUp = pts[pts.length - 1] >= pts[0];
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-label="equity curve">
+      <path d={d} fill="none" stroke={lastUp ? '#10b981' : '#ef4444'} strokeWidth={1.5} />
+    </svg>
+  );
+}
+
 export default function SignalDetailClient({ signal }: { readonly signal: FullSignalResult }) {
   const [timeframe, setTimeframe] = useState(signal.timeframe);
   const [currentSignal, setCurrentSignal] = useState<FullSignalResult>(signal);
@@ -117,28 +139,6 @@ export default function SignalDetailClient({ signal }: { readonly signal: FullSi
     } finally {
       setBtLoading(false);
     }
-  }
-
-  // Render a tiny equity sparkline for the backtest result
-  function EquitySparkline({ values }: { values: number[] }) {
-    if (!values || values.length < 2) return null;
-    const width = 160;
-    const height = 40;
-    // Downsample to at most 80 points for simplicity
-    const step = Math.max(1, Math.floor(values.length / 80));
-    const pts = values.filter((_, i) => i % step === 0);
-    const min = Math.min(...pts);
-    const max = Math.max(...pts);
-    const range = max - min || 1;
-    const toX = (i: number) => (i / (pts.length - 1)) * width;
-    const toY = (v: number) => height - ((v - min) / range) * height;
-    const d = pts.map((v, i) => `${i === 0 ? 'M' : 'L'} ${toX(i).toFixed(2)} ${toY(v).toFixed(2)}`).join(' ');
-    const lastUp = pts[pts.length - 1] >= pts[0];
-    return (
-      <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-label="equity curve">
-        <path d={d} fill="none" stroke={lastUp ? '#10b981' : '#ef4444'} strokeWidth={1.5} />
-      </svg>
-    );
   }
 
   return (

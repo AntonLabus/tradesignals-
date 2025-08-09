@@ -146,70 +146,100 @@ async function fetchForexTimeseriesFallback(pair: string): Promise<PriceSeries> 
   return { closes, source: 'exchangeratehost:timeseries' };
 }
 
-/**
- * Fetch historical crypto prices from CoinGecko
- */
-async function fetchCryptoHistoricalData(pair: string, timeframe: string): Promise<PriceSeries> {
-  const sym = pair.split('/')[0].toLowerCase();
-  // Map common symbols to CoinGecko IDs
+// --- Crypto helpers to reduce complexity ---
+function mapCoinGeckoId(sym: string): string {
   const ID_MAP: Record<string, string> = {
     btc: 'bitcoin', eth: 'ethereum', sol: 'solana', xrp: 'ripple', ada: 'cardano', doge: 'dogecoin', ltc: 'litecoin',
     bnb: 'binancecoin', dot: 'polkadot', avax: 'avalanche-2', link: 'chainlink', matic: 'matic-network', trx: 'tron',
     shib: 'shiba-inu', bch: 'bitcoin-cash', xlm: 'stellar', near: 'near', uni: 'uniswap'
   };
-  const id = ID_MAP[sym] ?? sym;
-  const isDaily = timeframe === '1D';
-  // Use market_chart with appropriate interval for intraday freshness
-  const useHourly = timeframe === '1H' || timeframe === '4H';
-  const useMinutely = timeframe === '1m' || timeframe === '5m' || timeframe === '15m' || timeframe === '30m';
-  let params: any;
-  if (isDaily) {
-    params = { vs_currency: 'usd', days: '400', interval: 'daily' };
-  } else if (useHourly) {
-    params = { vs_currency: 'usd', days: '14', interval: 'hourly' };
-  } else if (useMinutely) {
-    // minutely only available when days <= 1
-    params = { vs_currency: 'usd', days: '1', interval: 'minutely' };
-  } else {
-    params = { vs_currency: 'usd', days: '30', interval: 'hourly' };
+  return ID_MAP[sym] ?? sym;
+}
+
+function marketChartParams(timeframe: string): { vs_currency: 'usd'; days: string; interval: 'daily' | 'hourly' | 'minutely' } {
+  if (timeframe === '1D') return { vs_currency: 'usd', days: '400', interval: 'daily' };
+  if (timeframe === '1H' || timeframe === '4H') return { vs_currency: 'usd', days: '14', interval: 'hourly' };
+  if (timeframe === '1m' || timeframe === '5m' || timeframe === '15m' || timeframe === '30m') return { vs_currency: 'usd', days: '1', interval: 'minutely' };
+  return { vs_currency: 'usd', days: '30', interval: 'hourly' };
+}
+
+function parseMarketChartPrices(prices: Array<[number, number]> | undefined, timeframe: string): PriceSeries | null {
+  if (!(prices?.length)) return null;
+  const closesRaw = prices.map((p) => p[1]);
+  if (timeframe === '4H') {
+    const ds: number[] = [];
+    for (let i = 0; i < closesRaw.length; i += 4) ds.push(closesRaw[Math.min(i + 3, closesRaw.length - 1)]);
+    return { closes: ds, source: 'coingecko:market_chart:4h' };
   }
+  return { closes: closesRaw, source: `coingecko:market_chart:${timeframe === '1D' ? 'daily' : 'intraday'}` };
+}
+
+function ohlcDays(timeframe: string): string {
+  if (timeframe === '1D') return '400';
+  if (timeframe === '1H' || timeframe === '4H') return '14';
+  return '1';
+}
+
+function parseOhlc(ohlc: Array<[number, number, number, number, number]> | undefined, timeframe: string): PriceSeries | null {
+  if (!Array.isArray(ohlc) || !ohlc.length) return null;
+  const closes = ohlc.map(c => c[4]);
+  const highs = ohlc.map(c => c[2]);
+  const lows = ohlc.map(c => c[3]);
+  if (timeframe === '4H') {
+    const dsClose: number[] = []; const dsHigh: number[] = []; const dsLow: number[] = [];
+    for (let i = 0; i < closes.length; i += 4) {
+      const end = Math.min(i + 3, closes.length - 1);
+      dsClose.push(closes[end]);
+      dsHigh.push(Math.max(...highs.slice(i, end + 1)));
+      dsLow.push(Math.min(...lows.slice(i, end + 1)));
+    }
+    return { closes: dsClose, highs: dsHigh, lows: dsLow, source: 'coingecko:ohlc:4h' };
+  }
+  return { closes, highs, lows, source: 'coingecko:ohlc' };
+}
+
+async function fetchFromMarketChart(id: string, timeframe: string): Promise<PriceSeries | null> {
   try {
-    const response = await axios.get(`https://api.coingecko.com/api/v3/coins/${id}/market_chart`, { params });
-    const prices = response.data?.prices as Array<[number, number]> | undefined;
-    if (!(prices?.length)) throw new Error('No price data received from CoinGecko');
-    const closesRaw = prices.map((p) => p[1]);
-    // Downsample for 4H from hourly
-    if (timeframe === '4H') {
-      const ds: number[] = [];
-      for (let i = 0; i < closesRaw.length; i += 4) ds.push(closesRaw[Math.min(i + 3, closesRaw.length - 1)]);
-      return { closes: ds, source: `coingecko:market_chart:${params.interval || (isDaily ? 'daily' : 'hourly')}` };
-    }
-    return { closes: closesRaw, source: `coingecko:market_chart:${params.interval || (isDaily ? 'daily' : 'hourly')}` };
-  } catch (e) {
-    // Fallback to OHLC endpoint if market_chart path fails or rate limited
+    const response = await axios.get(`https://api.coingecko.com/api/v3/coins/${id}/market_chart`, { params: marketChartParams(timeframe) });
+    return parseMarketChartPrices(response.data?.prices as Array<[number, number]> | undefined, timeframe);
+  } catch {
+    return null;
+  }
+}
+
+async function fetchFromOHLC(id: string, timeframe: string): Promise<PriceSeries | null> {
+  try {
+    const days = ohlcDays(timeframe);
+    const resp = await axios.get(`https://api.coingecko.com/api/v3/coins/${id}/ohlc`, { params: { vs_currency: 'usd', days } });
+    return parseOhlc(resp.data as Array<[number, number, number, number, number]>, timeframe);
+  } catch {
+    return null;
+  }
+}
+
+async function firstAvailable<T>(fns: Array<() => Promise<T | null>>): Promise<T> {
+  for (const fn of fns) {
     try {
-      const days = isDaily ? '400' : (useHourly ? '14' : '1');
-      const resp = await axios.get(`https://api.coingecko.com/api/v3/coins/${id}/ohlc`, { params: { vs_currency: 'usd', days } });
-      const ohlc = resp.data as Array<[number, number, number, number, number]>;
-      if (!Array.isArray(ohlc) || !ohlc.length) throw new Error('OHLC empty');
-      const closes = ohlc.map(c => c[4]);
-      const highs = ohlc.map(c => c[2]);
-      const lows = ohlc.map(c => c[3]);
-      if (timeframe === '4H') {
-        const dsClose: number[] = []; const dsHigh: number[] = []; const dsLow: number[] = [];
-        for (let i = 0; i < closes.length; i += 4) {
-          const end = Math.min(i + 3, closes.length - 1);
-          dsClose.push(closes[end]);
-          dsHigh.push(Math.max(...highs.slice(i, end + 1)));
-          dsLow.push(Math.min(...lows.slice(i, end + 1)));
-        }
-        return { closes: dsClose, highs: dsHigh, lows: dsLow, source: 'coingecko:ohlc' };
-      }
-      return { closes, highs, lows, source: 'coingecko:ohlc' };
+      const v = await fn();
+      if (v) return v as T;
     } catch {
-      throw e;
+      // continue
     }
   }
+  throw new Error('No crypto data');
+}
+
+/**
+ * Fetch historical crypto prices from CoinGecko with low complexity
+ */
+async function fetchCryptoHistoricalData(pair: string, timeframe: string): Promise<PriceSeries> {
+  const sym = pair.split('/')[0].toLowerCase();
+  const id = mapCoinGeckoId(sym);
+  const series = await firstAvailable<PriceSeries>([
+    () => fetchFromMarketChart(id, timeframe),
+    () => fetchFromOHLC(id, timeframe),
+  ]);
+  return series;
 }
 
 /**

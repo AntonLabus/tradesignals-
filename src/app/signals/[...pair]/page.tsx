@@ -29,7 +29,23 @@ export default async function SignalDetailPage({ params, searchParams }: SignalD
     return <SignalDetailClient signal={signal} />;
   } catch (e) {
     console.error('SignalDetailPage error:', e instanceof Error ? e.message : e);
-    notFound();
+    // Graceful fallback instead of 404 so users see the page even if a data provider failed
+    const fallback: FullSignalResult = {
+      pair,
+      assetClass: /^(BTC|ETH|SOL|XRP|ADA|DOGE|BNB|LTC|DOT|AVAX|LINK|MATIC|TRX|SHIB|BCH|XLM|NEAR|UNI)\//.test(pair) ? 'Crypto' : 'Forex',
+      type: 'Hold',
+      confidence: 0,
+      timeframe,
+      buyLevel: 0,
+      stopLoss: 0,
+      takeProfit: 0,
+      explanation: 'Data temporarily unavailable',
+      stale: true,
+      news: [],
+      indicators: { rsi: 0, sma50: 0, sma200: 0 },
+      fundamentals: { score: 0, factors: [] },
+    } as FullSignalResult;
+    return <SignalDetailClient signal={fallback} />;
   }
 }
 

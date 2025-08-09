@@ -122,13 +122,46 @@ interface PriceSeries { closes: number[]; highs?: number[]; lows?: number[]; sou
 // Reintroduce simple in-memory cache and fallback generator
 const memoryCache: Record<string, { ts: number; data: number[] }> = {};
 function cacheKey(pair: string, tf: string) { return `${pair}:${tf}`; }
-const generateFallbackData = (pair: string): number[] => {
-  const base = pair.split('/')[0].toUpperCase();
-  const isC = ['BTC','ETH','SOL','XRP','ADA','DOGE','LTC','BNB','DOT','AVAX','LINK'].includes(base);
-  const basePrice = isC ? 50000 : 1.1;
-  const variance = isC ? 1000 : 0.05;
-  return Array.from({ length: 60 }, (_, i) => basePrice + Math.sin(i / 5) * variance * 0.01 + (Math.random() - 0.5) * variance * 0.002);
-};
+// Determine a reasonable series length for a timeframe
+function seriesLengthFor(timeframe: string): number {
+  return HISTORY_LOOKBACK[timeframe] || 120;
+}
+
+// Generate a synthetic series centered around a live price (or a sane default)
+async function syntheticSeriesFromLive(pair: string, timeframe: string): Promise<PriceSeries> {
+  let price = 0;
+  try {
+    const { getCryptoPrice, getForexPrice } = await import('./api');
+    if (isCrypto(pair)) {
+      const p = await getCryptoPrice(pair);
+      price = Number(p?.price) || 0;
+    } else {
+      const p = await getForexPrice(pair);
+      price = Number(p?.price) || 0;
+    }
+  } catch {
+    // ignore, fallback below
+  }
+  if (!Number.isFinite(price) || price <= 0) {
+    // Conservative defaults if live fetch failed
+    price = isCrypto(pair) ? 100 : 1.1;
+  }
+  const n = seriesLengthFor(timeframe);
+  const isC = isCrypto(pair);
+  const vol = isC ? price * 0.015 : price * 0.002; // ~1.5% swing for crypto, 0.2% for FX
+  const closes: number[] = [];
+  const highs: number[] = [];
+  const lows: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const base = price + Math.sin(i / 7) * vol * 0.25 + (Math.random() - 0.5) * vol * 0.05;
+    const hi = base + (Math.random() * vol * 0.1);
+    const lo = base - (Math.random() * vol * 0.1);
+    closes.push(base);
+    highs.push(hi);
+    lows.push(lo);
+  }
+  return { closes, highs, lows, source: 'synthetic:live' };
+}
 
 // Helper: fallback daily timeseries via exchangerate.host
 async function fetchForexTimeseriesFallback(pair: string): Promise<PriceSeries> {
@@ -318,9 +351,15 @@ async function fetchHistoricalData(pair: string, timeframe: string = '1H'): Prom
     memoryCache[key] = { ts: now, data: series.closes }; // store full fetched closes for reuse
     return { closes, highs, lows };
   } catch (e) {
-    console.error('Historical fetch failed, fallback data', e instanceof Error ? e.message : e);
-    const fallback = generateFallbackData(pair);
-    return { closes: fallback };
+    console.error('Historical fetch failed, using synthetic series', e instanceof Error ? e.message : e);
+    const synthetic = await syntheticSeriesFromLive(pair, timeframe);
+    const L = seriesLengthFor(timeframe);
+    return {
+      closes: synthetic.closes.slice(-L),
+      highs: synthetic.highs?.slice(-L),
+      lows: synthetic.lows?.slice(-L),
+      source: synthetic.source,
+    };
   }
 }
 

@@ -3,24 +3,41 @@ import Parser from 'rss-parser';
 
 export async function getCryptoPrice(pair: string) {
   // Convert pair like 'BTC/USD' to CoinGecko ID 'bitcoin'
-  const slug = pair.split('/')[0].toLowerCase();
+  const [base, quote] = pair.split('/');
+  const slug = base.toLowerCase();
   const idMap: Record<string, string> = {
     btc: 'bitcoin', eth: 'ethereum', sol: 'solana', xrp: 'ripple', ada: 'cardano', doge: 'dogecoin', ltc: 'litecoin',
     bnb: 'binancecoin', dot: 'polkadot', avax: 'avalanche-2', link: 'chainlink', matic: 'matic-network', trx: 'tron',
     shib: 'shiba-inu', bch: 'bitcoin-cash', xlm: 'stellar', near: 'near', uni: 'uniswap'
   };
   const id = idMap[slug] ?? slug;
-  try {
-    const res = await axios.get('https://api.coingecko.com/api/v3/coins/markets', {
-      params: { vs_currency: 'usd', ids: id }
-    });
-    const data = res.data?.[0];
-    if (!data) throw new Error(`No market data for ${id}`);
-    return { price: data.current_price };
-  } catch (error) {
-    console.error('Error fetching crypto price:', error);
-    return { price: 0 };
-  }
+  const symbolYahoo = `${base.toUpperCase()}-${(quote || 'USD').toUpperCase()}`;
+  const price = await tryFetchers<number>([
+    async () => {
+      const res = await axios.get('https://api.coingecko.com/api/v3/coins/markets', {
+        params: { vs_currency: (quote || 'USD').toLowerCase(), ids: id }
+      });
+      const data = res.data?.[0];
+      const p = Number(data?.current_price);
+      return Number.isFinite(p) && p > 0 ? p : null;
+    },
+    async () => {
+      // Yahoo quote as fallback (works for e.g. ETH-USD, BTC-USD)
+      const res = await axios.get('https://query1.finance.yahoo.com/v7/finance/quote', { params: { symbols: symbolYahoo } });
+      const q = res.data?.quoteResponse?.result?.[0];
+      const p = Number(q?.regularMarketPrice ?? q?.bid ?? q?.ask);
+      return Number.isFinite(p) && p > 0 ? p : null;
+    },
+    async () => {
+      // CoinGecko simple price fallback
+      const res = await axios.get('https://api.coingecko.com/api/v3/simple/price', {
+        params: { ids: id, vs_currencies: (quote || 'USD').toLowerCase() }
+      });
+      const p = Number(res.data?.[id]?.[(quote || 'USD').toLowerCase()]);
+      return Number.isFinite(p) && p > 0 ? p : null;
+    }
+  ]);
+  return { price: price ?? 0 };
 }
 
 export async function getFearGreed() {

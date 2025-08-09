@@ -284,6 +284,29 @@ async function fetchCryptoHistoricalData(pair: string, timeframe: string): Promi
   const series = await firstAvailable<PriceSeries>([
     () => fetchFromMarketChart(id, timeframe),
     () => fetchFromOHLC(id, timeframe),
+    async () => {
+      // Yahoo Finance chart fallback for crypto (e.g., BTCUSD, ETHUSD)
+      try {
+        const base = pair.split('/')[0].toUpperCase();
+        const quote = (pair.split('/')[1] || 'USD').toUpperCase();
+        const symbol = `${base}-${quote}`; // for quote endpoint
+        const chartSymbol = `${base}${quote}=X`; // for chart endpoint style
+        let yfInterval = '60m';
+        if (timeframe === '1m') yfInterval = '1m';
+        else if (timeframe === '5m') yfInterval = '5m';
+        else if (timeframe === '15m') yfInterval = '15m';
+        else if (timeframe === '30m') yfInterval = '30m';
+        const isDaily = timeframe === '1D';
+        let range = '5d';
+        if (isDaily) range = '5y';
+        const res = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(chartSymbol)}`, {
+          params: { interval: isDaily ? '1d' : yfInterval, range }
+        });
+        const closes = res.data?.chart?.result?.[0]?.indicators?.quote?.[0]?.close as number[] | undefined;
+        if (closes?.length) return { closes, source: 'yahoo:crypto:chart' };
+      } catch { /* ignore */ }
+      return null;
+    },
   ]);
   return series;
 }

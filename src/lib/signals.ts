@@ -106,7 +106,9 @@ const TIMEFRAME_CONFIG: Record<string, { macdFast: number; macdSlow: number; mac
 };
 
 // Explicit crypto symbol set to avoid treating every USD pair as crypto
-const CRYPTO_SYMBOLS = new Set(['BTC','ETH','SOL','XRP','ADA','DOGE','LTC','BNB','DOT','AVAX','LINK']);
+const CRYPTO_SYMBOLS = new Set([
+  'BTC','ETH','SOL','XRP','ADA','DOGE','LTC','BNB','DOT','AVAX','LINK','MATIC','TRX','SHIB','BCH','XLM','NEAR','UNI'
+]);
 const isCrypto = (pair: string): boolean => {
   const base = pair.split('/')[0].toUpperCase();
   return CRYPTO_SYMBOLS.has(base);
@@ -147,7 +149,14 @@ async function fetchForexTimeseriesFallback(pair: string): Promise<PriceSeries> 
  * Fetch historical crypto prices from CoinGecko
  */
 async function fetchCryptoHistoricalData(pair: string, timeframe: string): Promise<PriceSeries> {
-  const id = pair.split('/')[0].toLowerCase();
+  const sym = pair.split('/')[0].toLowerCase();
+  // Map common symbols to CoinGecko IDs
+  const ID_MAP: Record<string, string> = {
+    btc: 'bitcoin', eth: 'ethereum', sol: 'solana', xrp: 'ripple', ada: 'cardano', doge: 'dogecoin', ltc: 'litecoin',
+    bnb: 'binancecoin', dot: 'polkadot', avax: 'avalanche-2', link: 'chainlink', matic: 'matic-network', trx: 'tron',
+    shib: 'shiba-inu', bch: 'bitcoin-cash', xlm: 'stellar', near: 'near', uni: 'uniswap'
+  };
+  const id = ID_MAP[sym] ?? sym;
   const isDaily = timeframe === '1D';
   // Use market_chart with appropriate interval for intraday freshness
   const useHourly = timeframe === '1H' || timeframe === '4H';
@@ -163,17 +172,43 @@ async function fetchCryptoHistoricalData(pair: string, timeframe: string): Promi
   } else {
     params = { vs_currency: 'usd', days: '30', interval: 'hourly' };
   }
-  const response = await axios.get(`https://api.coingecko.com/api/v3/coins/${id}/market_chart`, { params });
-  const prices = response.data?.prices as Array<[number, number]> | undefined;
-  if (!(prices?.length)) throw new Error('No price data received from CoinGecko');
-  const closesRaw = prices.map((p) => p[1]);
-  // Downsample for 4H from hourly
-  if (timeframe === '4H') {
-    const ds: number[] = [];
-    for (let i = 0; i < closesRaw.length; i += 4) ds.push(closesRaw[Math.min(i + 3, closesRaw.length - 1)]);
-    return { closes: ds };
+  try {
+    const response = await axios.get(`https://api.coingecko.com/api/v3/coins/${id}/market_chart`, { params });
+    const prices = response.data?.prices as Array<[number, number]> | undefined;
+    if (!(prices?.length)) throw new Error('No price data received from CoinGecko');
+    const closesRaw = prices.map((p) => p[1]);
+    // Downsample for 4H from hourly
+    if (timeframe === '4H') {
+      const ds: number[] = [];
+      for (let i = 0; i < closesRaw.length; i += 4) ds.push(closesRaw[Math.min(i + 3, closesRaw.length - 1)]);
+      return { closes: ds };
+    }
+    return { closes: closesRaw };
+  } catch (e) {
+    // Fallback to OHLC endpoint if market_chart path fails or rate limited
+    try {
+      const days = isDaily ? '400' : (useHourly ? '14' : '1');
+      const resp = await axios.get(`https://api.coingecko.com/api/v3/coins/${id}/ohlc`, { params: { vs_currency: 'usd', days } });
+      const ohlc = resp.data as Array<[number, number, number, number, number]>;
+      if (!Array.isArray(ohlc) || !ohlc.length) throw new Error('OHLC empty');
+      const closes = ohlc.map(c => c[4]);
+      const highs = ohlc.map(c => c[2]);
+      const lows = ohlc.map(c => c[3]);
+      if (timeframe === '4H') {
+        const dsClose: number[] = []; const dsHigh: number[] = []; const dsLow: number[] = [];
+        for (let i = 0; i < closes.length; i += 4) {
+          const end = Math.min(i + 3, closes.length - 1);
+          dsClose.push(closes[end]);
+          dsHigh.push(Math.max(...highs.slice(i, end + 1)));
+          dsLow.push(Math.min(...lows.slice(i, end + 1)));
+        }
+        return { closes: dsClose, highs: dsHigh, lows: dsLow };
+      }
+      return { closes, highs, lows };
+    } catch {
+      throw e;
+    }
   }
-  return { closes: closesRaw };
 }
 
 /**

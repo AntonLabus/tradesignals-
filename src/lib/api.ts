@@ -4,7 +4,11 @@ import Parser from 'rss-parser';
 export async function getCryptoPrice(pair: string) {
   // Convert pair like 'BTC/USD' to CoinGecko ID 'bitcoin'
   const slug = pair.split('/')[0].toLowerCase();
-  const idMap: Record<string, string> = { btc: 'bitcoin', eth: 'ethereum' };
+  const idMap: Record<string, string> = {
+    btc: 'bitcoin', eth: 'ethereum', sol: 'solana', xrp: 'ripple', ada: 'cardano', doge: 'dogecoin', ltc: 'litecoin',
+    bnb: 'binancecoin', dot: 'polkadot', avax: 'avalanche-2', link: 'chainlink', matic: 'matic-network', trx: 'tron',
+    shib: 'shiba-inu', bch: 'bitcoin-cash', xlm: 'stellar', near: 'near', uni: 'uniswap'
+  };
   const id = idMap[slug] ?? slug;
   try {
     const res = await axios.get('https://api.coingecko.com/api/v3/coins/markets', {

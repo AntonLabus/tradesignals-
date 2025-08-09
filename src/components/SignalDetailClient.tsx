@@ -50,12 +50,13 @@ export default function SignalDetailClient({ signal }: { readonly signal: FullSi
   // When timeframe changes, fetch a fresh signal for this pair and update the UI
   useEffect(() => {
     let cancelled = false;
-    async function load() {
+    const controller = new AbortController();
+  async function load() {
       try {
         setLoading(true);
         setError(null);
         const url = `/api/signals?pairs=${encodeURIComponent(signal.pair)}&timeframe=${encodeURIComponent(timeframe)}`;
-        const res = await fetch(url);
+        const res = await fetch(url, { signal: controller.signal });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
         const updated: FullSignalResult | undefined = json?.signals?.[0];
@@ -63,13 +64,22 @@ export default function SignalDetailClient({ signal }: { readonly signal: FullSi
           setCurrentSignal(updated);
         }
       } catch (e) {
-        if (!cancelled) setError('Failed to update for selected timeframe.');
+    const err = e as any;
+    const name: string | undefined = (err && typeof err === 'object' && 'name' in err) ? String(err.name) : undefined;
+    const msg: string = e instanceof Error ? e.message : String(e);
+        // Log for diagnostics and surface a concise message to the UI
+        console.error('Signal update failed:', msg);
+    if (!cancelled && name !== 'AbortError') {
+          setError(`Failed to update for selected timeframe (${msg}).`);
+        }
+    // Rethrow so callers can decide how to handle; we swallow at invocation site
+    throw e;
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
-    load();
-    return () => { cancelled = true; };
+  load().catch(() => { /* handled above; no-op */ });
+    return () => { cancelled = true; controller.abort(); };
   }, [signal.pair, timeframe]);
 
   return (

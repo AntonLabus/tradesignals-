@@ -20,12 +20,12 @@ export default function TimeframeSelector({ onChange }: TimeframeSelectorProps) 
       <label htmlFor="timeframe" className="font-medium">Timeframe:</label>
       <select
         id="timeframe"
-        className="border rounded p-1"
+        className="select-light rounded-md border bg-white text-slate-900 px-2 py-1 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/60"
         value={selected}
         onChange={handleChange}
       >
         {timeframes.map((tf) => (
-          <option key={tf} value={tf}>{tf}</option>
+          <option key={tf} value={tf} className="text-slate-900 bg-white">{tf}</option>
         ))}
       </select>
     </div>

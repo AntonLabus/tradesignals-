@@ -37,3 +37,17 @@ html, body {
   0% { background-position: 0% 50%; }
   100% { background-position: 200% 50%; }
 }
+
+/* Force light palette for native selects and their dropdowns */
+.select-light, .select-light select {
+  color-scheme: light;
+}
+.select-light select {
+  background-color: #fff; /* white background for readability */
+  color: #0f172a;         /* slate-900 text */
+  border-color: rgba(34,211,238,0.3); /* cyan-300/30 */
+}
+.select-light option {
+  background-color: #fff;
+  color: #0f172a;
+}

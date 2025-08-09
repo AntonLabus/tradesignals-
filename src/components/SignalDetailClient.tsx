@@ -26,11 +26,17 @@ export default function SignalDetailClient({ signal }: { readonly signal: FullSi
   if (signal.type === 'Buy') typeColor = 'text-green-600';
   else if (signal.type === 'Sell') typeColor = 'text-red-600';
 
+  const fundamentalScore = signal.fundamentals?.score ?? signal.fundamentalScore;
+  const fundamentalScoreDisplay = fundamentalScore != null ? Math.round(fundamentalScore) : '—';
+
   return (
     <div className="space-y-6">
       <h1 className="text-3xl font-bold">Signal for {signal.pair}</h1>
 
-      <TimeframeSelector onChange={setTimeframe} />
+      {/* Make the internal selector readable on dark bg */}
+      <div className="select-light inline-block">
+        <TimeframeSelector onChange={setTimeframe} />
+      </div>
 
       <div className="h-64">
         <TradingViewWidget
@@ -73,7 +79,7 @@ export default function SignalDetailClient({ signal }: { readonly signal: FullSi
         </div>
         <div className="bg-white dark:bg-gray-800 p-4 rounded shadow">
           <h2 className="text-xl font-semibold mb-2">Fundamentals</h2>
-          <p className="text-sm mb-2">Score: {signal.fundamentals?.score ?? signal.fundamentalScore ?? '—'}</p>
+          <p className="text-sm mb-2">Score: {fundamentalScoreDisplay}</p>
           <ul className="list-disc list-inside mt-2 text-xs space-y-1 max-h-40 overflow-auto pr-1">
             {signal.fundamentals?.factors?.map(f => <li key={f}>{f}</li>)}
           </ul>

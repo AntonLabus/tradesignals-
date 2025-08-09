@@ -187,7 +187,12 @@ export default function SignalsTable({ signals: initial, showInlineFilters = tru
                       <div className="text-[10px] text-gray-400">{sig.assetClass}</div>
                     </td>
                     <td className="px-4 py-2">
-                      <span className={`px-2 py-1 rounded text-xs font-semibold inline-block ${badgeColor(sig.type)}`}>{sig.type}</span>
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-1 rounded text-xs font-semibold inline-block ${badgeColor(sig.type)}`}>{sig.type}</span>
+                        {sig.stale ? (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium inline-block bg-amber-500/10 text-amber-300 border border-amber-500/20" title="Soft-stale; refreshing soon">Refreshing…</span>
+                        ) : null}
+                      </div>
                     </td>
                     <td className="px-4 py-2 w-28">
                       <div className="w-full bg-white/10 h-2 rounded overflow-hidden" title={`${sig.confidence}%`}>

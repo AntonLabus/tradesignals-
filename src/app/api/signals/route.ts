@@ -41,6 +41,7 @@ function fallbackSignal(pair: string, timeframe: string, reason: string, prior?:
   stopLoss: prior?.stopLoss ?? 0,
   takeProfit: prior?.takeProfit ?? 0,
     explanation: reason,
+  stale: true,
     news: [],
     indicators: { rsi: 0, sma50: 0, sma200: 0 },
     fundamentals: { score: 0, factors: [] },
@@ -55,6 +56,25 @@ export async function GET(req: Request) {
   const pairs = pairsParam.split(',').map(p => p.trim()).filter(Boolean);
 
   const results: FullSignalResult[] = [];
+
+  // Lightweight prewarm: on first request without explicit pairs, try to load top 6 pairs into cache.
+  // This runs only if cache is cold for those keys and within budget.
+  if (!searchParams.get('pairs')) {
+    const warmPairs = DEFAULT_PAIRS.slice(0, 6);
+    await Promise.all(warmPairs.map(async (pair) => {
+      const key = pair + ':' + timeframe;
+      if (cache[key]) return; // already present
+      if (Date.now() - start > GLOBAL_BUDGET / 2) return; // keep budget
+      try {
+        const sig = await withTimeout(calculateSignal(pair, timeframe), PER_SIGNAL_TIMEOUT, () => fallbackSignal(pair, timeframe, 'Warm Timeout'));
+        if (!(sig.confidence === 0 && sig.type === 'Hold' && /^(Timeout|Skipped|Warm)/.test(sig.explanation))) {
+          cache[key] = { ts: Date.now(), data: sig };
+        }
+      } catch {
+        // ignore
+      }
+    }));
+  }
 
   for (let i = 0; i < pairs.length; i += BATCH_SIZE) {
     if (Date.now() - start > GLOBAL_BUDGET) {
@@ -79,7 +99,7 @@ export async function GET(req: Request) {
         PER_SIGNAL_TIMEOUT,
         () => {
           // On timeout, serve soft-stale cache if available instead of zeroed fallback
-          if (cached) return cached.data;
+          if (cached) return { ...cached.data, stale: true } as FullSignalResult;
           return fallbackSignal(pair, timeframe, 'Timeout');
         }
       );

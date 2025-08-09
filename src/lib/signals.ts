@@ -23,6 +23,7 @@ export interface FullSignalResult {
   stopLoss: number;
   takeProfit: number;
   explanation: string;
+  stale?: boolean; // true when returned from soft-stale cache/fallback
   news: { title: string; url: string }[];
   indicators: { rsi: number; sma50: number; sma200: number; ema20?: number; ema50?: number; atr?: number; macd?: number; macdSignal?: number; macdHist?: number };
   fundamentals: { score: number; factors: string[] };
@@ -514,6 +515,7 @@ export async function calculateSignal(pair: string, timeframe: string = '1H'): P
   stopLoss: parseFloat(levels.sl.toFixed(4)),
   takeProfit: parseFloat(levels.tp.toFixed(4)),
     explanation,
+  stale: false,
     news: fundamentals.news,
     indicators: { rsi: lastRSI, sma50: lastSMA, sma200, ema20, ema50, atr, macd, macdSignal, macdHist },
     fundamentals: { score: fundamentals.score, factors: fundamentals.factors },

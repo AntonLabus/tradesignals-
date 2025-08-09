@@ -25,6 +25,19 @@ export default function SignalDetailClient({ signal }: { readonly signal: FullSi
   const [currentSignal, setCurrentSignal] = useState<FullSignalResult>(signal);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Backtest UI state
+  const [btLoading, setBtLoading] = useState(false);
+  const [btError, setBtError] = useState<string | null>(null);
+  const [btResult, setBtResult] = useState<null | {
+    pair: string;
+    timeframe: string;
+    trades: number;
+    wins: number;
+    winRate: number;
+    totalReturnPct: number;
+    equityCurve: number[];
+    maxDrawdownPct: number;
+  }>(null);
 
   let typeColor = 'text-gray-600';
   if (currentSignal.type === 'Buy') typeColor = 'text-green-600';
@@ -81,6 +94,52 @@ export default function SignalDetailClient({ signal }: { readonly signal: FullSi
   load().catch(() => { /* handled above; no-op */ });
     return () => { cancelled = true; controller.abort(); };
   }, [signal.pair, timeframe]);
+
+  // Trigger a backtest for the current pair/timeframe
+  async function runBacktest() {
+    try {
+      setBtLoading(true);
+      setBtError(null);
+      setBtResult(null);
+      const url = `/api/backtest?pair=${encodeURIComponent(currentSignal.pair)}&timeframe=${encodeURIComponent(timeframe)}`;
+      const res = await fetch(url, { method: 'GET' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      if (json?.ok && json?.result) {
+        setBtResult(json.result);
+      } else {
+        throw new Error(json?.error || 'Unknown backtest error');
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error('Backtest failed:', msg);
+      setBtError(`Backtest failed: ${msg}`);
+    } finally {
+      setBtLoading(false);
+    }
+  }
+
+  // Render a tiny equity sparkline for the backtest result
+  function EquitySparkline({ values }: { values: number[] }) {
+    if (!values || values.length < 2) return null;
+    const width = 160;
+    const height = 40;
+    // Downsample to at most 80 points for simplicity
+    const step = Math.max(1, Math.floor(values.length / 80));
+    const pts = values.filter((_, i) => i % step === 0);
+    const min = Math.min(...pts);
+    const max = Math.max(...pts);
+    const range = max - min || 1;
+    const toX = (i: number) => (i / (pts.length - 1)) * width;
+    const toY = (v: number) => height - ((v - min) / range) * height;
+    const d = pts.map((v, i) => `${i === 0 ? 'M' : 'L'} ${toX(i).toFixed(2)} ${toY(v).toFixed(2)}`).join(' ');
+    const lastUp = pts[pts.length - 1] >= pts[0];
+    return (
+      <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-label="equity curve">
+        <path d={d} fill="none" stroke={lastUp ? '#10b981' : '#ef4444'} strokeWidth={1.5} />
+      </svg>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -154,6 +213,43 @@ export default function SignalDetailClient({ signal }: { readonly signal: FullSi
               </div>
             ))}
           </div>
+        </div>
+        {/* Backtest card - wraps to new row on smaller widths */}
+        <div className="bg-white dark:bg-gray-800 p-4 rounded shadow">
+          <h2 className="text-xl font-semibold mb-2">Backtest</h2>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={runBacktest}
+              disabled={btLoading}
+              className="px-3 py-1 text-sm rounded bg-blue-600 text-white disabled:opacity-50"
+            >
+              {btLoading ? 'Running…' : 'Run Backtest'}
+            </button>
+            {btError && <span className="text-xs text-rose-400">{btError}</span>}
+          </div>
+          {btResult && (
+            <div className="mt-3 text-sm space-y-1">
+              <div className="flex items-center justify-between">
+                <span>Trades</span>
+                <span className="font-semibold">{btResult.trades}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Win rate</span>
+                <span className="font-semibold">{btResult.winRate.toFixed(1)}%</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Total return</span>
+                <span className={`font-semibold ${btResult.totalReturnPct >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {btResult.totalReturnPct.toFixed(1)}%
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Max drawdown</span>
+                <span className="font-semibold">{btResult.maxDrawdownPct.toFixed(1)}%</span>
+              </div>
+              <div className="mt-2"><EquitySparkline values={btResult.equityCurve} /></div>
+            </div>
+          )}
         </div>
       </div>
 

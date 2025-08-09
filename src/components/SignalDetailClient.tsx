@@ -1,5 +1,5 @@
 "use client";
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import type { FullSignalResult } from '../lib/signals';
 
@@ -22,11 +22,15 @@ export interface SignalData extends FullSignalResult {}
 
 export default function SignalDetailClient({ signal }: { readonly signal: FullSignalResult }) {
   const [timeframe, setTimeframe] = useState(signal.timeframe);
-  let typeColor = 'text-gray-600';
-  if (signal.type === 'Buy') typeColor = 'text-green-600';
-  else if (signal.type === 'Sell') typeColor = 'text-red-600';
+  const [currentSignal, setCurrentSignal] = useState<FullSignalResult>(signal);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const fundamentalScore = signal.fundamentals?.score ?? signal.fundamentalScore;
+  let typeColor = 'text-gray-600';
+  if (currentSignal.type === 'Buy') typeColor = 'text-green-600';
+  else if (currentSignal.type === 'Sell') typeColor = 'text-red-600';
+
+  const fundamentalScore = currentSignal.fundamentals?.score ?? currentSignal.fundamentalScore;
   const fundamentalScoreDisplay = fundamentalScore != null ? Math.round(fundamentalScore) : '—';
 
   // Map UI timeframe to TradingView interval values
@@ -43,18 +47,47 @@ export default function SignalDetailClient({ signal }: { readonly signal: FullSi
     }
   })();
 
+  // When timeframe changes, fetch a fresh signal for this pair and update the UI
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        setLoading(true);
+        setError(null);
+        const url = `/api/signals?pairs=${encodeURIComponent(signal.pair)}&timeframe=${encodeURIComponent(timeframe)}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        const updated: FullSignalResult | undefined = json?.signals?.[0];
+        if (!cancelled && updated) {
+          setCurrentSignal(updated);
+        }
+      } catch (e) {
+        if (!cancelled) setError('Failed to update for selected timeframe.');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [signal.pair, timeframe]);
+
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold">Signal for {signal.pair}</h1>
+  <h1 className="text-3xl font-bold">Signal for {currentSignal.pair}</h1>
 
       {/* Make the internal selector readable on dark bg */}
-      <div className="select-light inline-block">
-        <TimeframeSelector onChange={setTimeframe} />
+      <div className="flex items-center gap-3">
+        <div className="select-light inline-block">
+          <TimeframeSelector onChange={setTimeframe} />
+        </div>
+        {loading && <span className="text-xs text-cyan-300">Updating…</span>}
+        {error && <span className="text-xs text-rose-300">{error}</span>}
       </div>
 
       <div className="h-64">
         <TradingViewWidget
-          symbol={signal.pair.replace('/', '')}
+          symbol={currentSignal.pair.replace('/', '')}
           autosize
           theme="dark"
           interval={tvInterval}
@@ -65,44 +98,44 @@ export default function SignalDetailClient({ signal }: { readonly signal: FullSi
         <div className="bg-white dark:bg-gray-800 p-4 rounded shadow">
           <h2 className="text-xl font-semibold mb-2">Signal</h2>
           <ul className="mt-2 space-y-1 text-sm">
-            <li>Type: <span className={`font-semibold ${typeColor}`}>{signal.type}</span></li>
-            <li>Confidence: {signal.confidence}%</li>
+            <li>Type: <span className={`font-semibold ${typeColor}`}>{currentSignal.type}</span></li>
+            <li>Confidence: {currentSignal.confidence}%</li>
             <li>Timeframe: {timeframe}</li>
-            <li>Buy: {signal.buyLevel}</li>
-            <li>Stop: {signal.stopLoss}</li>
-            <li>Target: {signal.takeProfit}</li>
-            <li>Risk/Reward: {signal.riskReward?.toFixed?.(2) ?? '—'}</li>
-            <li>Risk: {signal.riskCategory ?? '—'}</li>
-            <li>Volatility: {signal.volatilityPct?.toFixed?.(2) ?? '—'}%</li>
+            <li>Buy: {currentSignal.buyLevel}</li>
+            <li>Stop: {currentSignal.stopLoss}</li>
+            <li>Target: {currentSignal.takeProfit}</li>
+            <li>Risk/Reward: {currentSignal.riskReward?.toFixed?.(2) ?? '—'}</li>
+            <li>Risk: {currentSignal.riskCategory ?? '—'}</li>
+            <li>Volatility: {currentSignal.volatilityPct?.toFixed?.(2) ?? '—'}%</li>
           </ul>
         </div>
         <div className="bg-white dark:bg-gray-800 p-4 rounded shadow">
           <h2 className="text-xl font-semibold mb-2">Technical</h2>
           <ul className="mt-2 space-y-1 text-sm">
-            <li>RSI: {signal.indicators?.rsi?.toFixed?.(2) ?? '—'}</li>
-            <li>SMA50: {signal.indicators?.sma50?.toFixed?.(2) ?? '—'}</li>
-            <li>SMA200: {signal.indicators?.sma200?.toFixed?.(2) ?? '—'}</li>
-            <li>EMA20: {signal.indicators?.ema20?.toFixed?.(2) ?? '—'}</li>
-            <li>EMA50: {signal.indicators?.ema50?.toFixed?.(2) ?? '—'}</li>
-            <li>ATR(est): {signal.indicators?.atr?.toFixed?.(2) ?? '—'}</li>
-            <li>MACD: {signal.indicators?.macd?.toFixed?.(2) ?? '—'}</li>
-            <li>MACD Signal: {signal.indicators?.macdSignal?.toFixed?.(2) ?? '—'}</li>
-            <li>MACD Hist: {signal.indicators?.macdHist?.toFixed?.(2) ?? '—'}</li>
-            <li className="mt-2">Technical Score: {signal.technicalScore ?? '—'}</li>
+            <li>RSI: {currentSignal.indicators?.rsi?.toFixed?.(2) ?? '—'}</li>
+            <li>SMA50: {currentSignal.indicators?.sma50?.toFixed?.(2) ?? '—'}</li>
+            <li>SMA200: {currentSignal.indicators?.sma200?.toFixed?.(2) ?? '—'}</li>
+            <li>EMA20: {currentSignal.indicators?.ema20?.toFixed?.(2) ?? '—'}</li>
+            <li>EMA50: {currentSignal.indicators?.ema50?.toFixed?.(2) ?? '—'}</li>
+            <li>ATR(est): {currentSignal.indicators?.atr?.toFixed?.(2) ?? '—'}</li>
+            <li>MACD: {currentSignal.indicators?.macd?.toFixed?.(2) ?? '—'}</li>
+            <li>MACD Signal: {currentSignal.indicators?.macdSignal?.toFixed?.(2) ?? '—'}</li>
+            <li>MACD Hist: {currentSignal.indicators?.macdHist?.toFixed?.(2) ?? '—'}</li>
+            <li className="mt-2">Technical Score: {currentSignal.technicalScore ?? '—'}</li>
           </ul>
         </div>
         <div className="bg-white dark:bg-gray-800 p-4 rounded shadow">
           <h2 className="text-xl font-semibold mb-2">Fundamentals</h2>
           <p className="text-sm mb-2">Score: {fundamentalScoreDisplay}</p>
           <ul className="list-disc list-inside mt-2 text-xs space-y-1 max-h-40 overflow-auto pr-1">
-            {signal.fundamentals?.factors?.map(f => <li key={f}>{f}</li>)}
+            {currentSignal.fundamentals?.factors?.map(f => <li key={f}>{f}</li>)}
           </ul>
         </div>
         <div className="bg-white dark:bg-gray-800 p-4 rounded shadow">
           <h2 className="text-xl font-semibold mb-2">Composite & Sections</h2>
-          <p className="text-sm">Composite: {signal.compositeScore ?? '—'}</p>
+          <p className="text-sm">Composite: {currentSignal.compositeScore ?? '—'}</p>
           <div className="mt-2 space-y-3 max-h-48 overflow-auto pr-1">
-            {signal.explanationSections?.map(sec => (
+            {currentSignal.explanationSections?.map(sec => (
               <div key={sec.title}>
                 <h3 className="font-semibold text-sm mb-1">{sec.title}</h3>
                 <ul className="list-disc list-inside text-xs space-y-0.5">
@@ -116,10 +149,10 @@ export default function SignalDetailClient({ signal }: { readonly signal: FullSi
 
       <div className="bg-white dark:bg-gray-800 p-4 rounded shadow">
         <h2 className="text-xl font-semibold">Analysis & News</h2>
-        <p className="mt-2 text-sm leading-relaxed">{signal.explanation}</p>
+        <p className="mt-2 text-sm leading-relaxed">{currentSignal.explanation}</p>
         <h3 className="mt-4 font-semibold">Related News</h3>
         <ul className="list-disc list-inside mt-2 space-y-1 text-sm">
-          {signal.news.map((item) => (
+          {currentSignal.news.map((item) => (
             <li key={item.url}>
               <a href={item.url} className="text-blue-500 hover:underline" target="_blank" rel="noopener noreferrer">
                 {item.title}

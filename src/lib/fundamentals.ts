@@ -34,24 +34,100 @@ function baseScoreForPair(pair: string): number {
   return /USD/.test(pair) ? 60 : 50;
 }
 
+// Lightweight macro tone scoring based on keywords/phrases
+function computeMacroTone(items: any[]): { normalized: number; descriptor: string } {
+  if (!items?.length) return { normalized: 0, descriptor: 'Neutral' };
+  const hawkish = [
+    'hawkish', 'hawk', 'higher for longer', 'tighten', 'tightening', 'rate hike', 'hike', 'increase rates',
+    'raise rates', 'raising rates', 'hot inflation', 'hotter-than-expected', 'above expectations', 'sticky inflation',
+    'reacceleration', 'accelerating inflation', 'surprise increase', 'beats expectations'
+  ];
+  const dovish = [
+    'dovish', 'dove', 'ease', 'easing', 'loosen', 'loosening', 'rate cut', 'cut', 'pause', 'pivot',
+    'cool inflation', 'cooler-than-expected', 'disinflation', 'deflation', 'below expectations', 'misses expectations'
+  ];
+  let hawk = 0; let dove = 0;
+  const hasAny = (text: string, list: string[]) => list.some(k => text.includes(k));
+  for (const it of items) {
+    const t = String(it?.title ?? '').toLowerCase();
+    if (!t) continue;
+    if (hasAny(t, hawkish)) hawk += 1;
+    if (hasAny(t, dovish)) dove += 1;
+  }
+  const raw = hawk - dove;
+  const normalized = clamp(raw / (items.length * 1.5), -1, 1);
+  let descriptor = 'Neutral';
+  if (normalized > 0.15) descriptor = 'Hawkish';
+  else if (normalized < -0.15) descriptor = 'Dovish';
+  return { normalized, descriptor };
+}
+
+function clamp(v: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, v));
+}
+
+// --- New small helpers to reduce complexity inside computeAdjustments ---
+function computeBuzzBoost(topCount: number): number {
+  return Math.min(15, topCount * 1.8);
+}
+
+function weightForMacroCategory(cat: string, pairHasUSD: boolean, pairHasEUR: boolean): number {
+  const C = cat.toUpperCase();
+  if (C.includes('FOMC')) return pairHasUSD ? 3 : 1;
+  if (C.includes('ECB')) return pairHasEUR ? 3 : 1;
+  if (C.includes('CPI')) return pairHasUSD ? 2.5 : 1;
+  return 0.5; // generic macro
+}
+
+function computeMacroBoostValue(macroNews: any[], pairHasUSD: boolean, pairHasEUR: boolean): number {
+  const sum = macroNews.reduce((acc, m) => acc + weightForMacroCategory(m.category || '', pairHasUSD, pairHasEUR), 0);
+  return Math.min(18, sum);
+}
+
+function makeFactors(ctx: { topLen: number; macroLen: number; macroBoost: number; fng: any; globalCrypto: any; sentimentDesc: string; macroToneDesc: string; pair: string }): string[] {
+  const usdRelevant = /USD/.test(ctx.pair);
+  return [
+    `Headlines ${ctx.topLen}`,
+    ctx.macroLen ? `Macro events ${ctx.macroLen} (weighted ${ctx.macroBoost.toFixed(1)})` : 'Low macro flow',
+    ctx.fng?.value != null ? `Fear & Greed ${ctx.fng.value} (${ctx.fng.classification})` : 'No FNG',
+    ctx.globalCrypto?.btcDominance != null ? `BTC Dom ${ctx.globalCrypto.btcDominance.toFixed(1)}%` : 'No dominance',
+    `Sentiment ${ctx.sentimentDesc ?? 'Neutral'}`,
+    `Macro tone ${ctx.macroToneDesc}`,
+    usdRelevant ? 'USD macro relevance' : 'Crypto sentiment baseline',
+  ];
+}
+
+function selectMacroTop(macroNews: any[], n = 5): { title: string; url: string }[] {
+  return macroNews.slice(0, n).map((m: any) => ({ title: (m.title || m.source || 'Macro'), url: m.url || '#' }));
+}
+
 function computeAdjustments(baseScore: number, pair: string, articles: any[], macroNews: any[], globalCrypto: any, fng: any, sentiment: { normalized: number; descriptor: string }) {
   const top = articles.slice(0, 8).map((a: any) => ({ title: a.title, url: a.url }));
-  const buzzBoost = Math.min(15, top.length * 1.8);
-  const macroBoost = Math.min(10, macroNews.length * 0.8);
+  const buzzBoost = computeBuzzBoost(top.length);
+  const pairHasUSD = /USD/.test(pair);
+  const pairHasEUR = /EUR/.test(pair);
+  const macroBoost = computeMacroBoostValue(macroNews, pairHasUSD, pairHasEUR);
+  // Macro tone adjustment (small), independent of pair, derived from headlines
+  const macroTone = computeMacroTone(macroNews);
+  const macroToneAdj = (macroTone.normalized || 0) * 6; // small tilt
   const dominanceAdj = globalCrypto?.btcDominance != null ? ((60 - globalCrypto.btcDominance) / 12) : 0;
   const fngAdj = fng?.value != null ? (fng.value - 50) / 6 : 0;
   const sentimentAdj = (sentiment?.normalized ?? 0) * 10;
-  const rawScore = baseScore + buzzBoost + macroBoost + dominanceAdj + fngAdj + sentimentAdj;
+  const rawScore = baseScore + buzzBoost + macroBoost + macroToneAdj + dominanceAdj + fngAdj + sentimentAdj;
   const score = Math.max(0, Math.min(100, rawScore));
-  const factors = [
-    `Headlines ${top.length}`,
-    macroNews.length ? `Macro feeds ${macroNews.length}` : 'Low macro flow',
-    fng?.value != null ? `Fear & Greed ${fng.value} (${fng.classification})` : 'No FNG',
-    globalCrypto?.btcDominance != null ? `BTC Dom ${globalCrypto.btcDominance.toFixed(1)}%` : 'No dominance',
-    `Sentiment ${sentiment?.descriptor ?? 'Neutral'}`,
-    /USD/.test(pair) ? 'USD macro relevance' : 'Crypto sentiment baseline',
-  ];
-  return { score, factors, news: top, sentimentScore: sentiment?.normalized ?? 0 };
+  const factors = makeFactors({
+    topLen: top.length,
+    macroLen: macroNews.length,
+    macroBoost,
+    fng,
+    globalCrypto,
+    sentimentDesc: sentiment?.descriptor,
+    macroToneDesc: macroTone.descriptor,
+    pair,
+  });
+  // Surface a few macro items into news to provide context
+  const macroTop = selectMacroTop(macroNews, 5);
+  return { score, factors, news: [...macroTop, ...top].slice(0, 10), sentimentScore: sentiment?.normalized ?? 0 };
 }
 
 function buildResult(baseScore: number, pair: string, cacheData: { articles: any[]; macroNews: any[]; globalCrypto: any; fng: any; sentiment: { normalized: number; descriptor: string } }): FundamentalData {

@@ -62,3 +62,10 @@ This project is configured for deployment on Netlify. Ensure the build command i
 - LIVE_PRICE_ANCHOR_FX_PIPS (or NEXT_PUBLIC_LIVE_PRICE_ANCHOR_FX_PIPS):
 	For Forex only, re-anchors if absolute diff exceeds this pip distance (50 pips by default).
 	JPY pairs use pip size of 0.01; others 0.0001.
+
+	## Data Sources
+
+	- Crypto: CoinGecko (prices, historical)
+	- Forex: Alpha Vantage, Yahoo Finance, exchangerate.host, Frankfurter, ER-API
+	- News: CryptoNews, CoinDesk, WSJ Markets, ECB press
+	- Macro: Federal Reserve (FOMC statements), ECB press releases, US BLS CPI releases, Bank of England, IMF

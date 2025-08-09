@@ -152,15 +152,48 @@ export async function getGlobalCrypto() {
 // Inject extra macro feeds once at runtime; getNews already aggregates, so optionally we could expose a getMacroNews.
 export async function getMacroNews() {
   const parser = new Parser();
-  const feeds = [
-    'https://www.federalreserve.gov/feeds/press_all.xml',
-    'https://www.bankofengland.co.uk/boeapps/rss/feeds.aspx?feed=NewsReleases',
-    'https://www.imf.org/external/whatshot.rss',
+  // Targeted macro sources: FOMC statements, ECB press, US CPI, plus others
+  const feeds: { url: string; category: 'FOMC' | 'ECB' | 'CPI' | 'Macro'; source?: string }[] = [
+    { url: 'https://www.federalreserve.gov/feeds/press_monetary.xml', category: 'FOMC', source: 'Federal Reserve – Monetary Policy' },
+    { url: 'https://www.federalreserve.gov/feeds/press_all.xml', category: 'Macro', source: 'Federal Reserve – All' },
+    { url: 'https://www.ecb.europa.eu/press/pressconf/html/index.en.rss', category: 'ECB', source: 'ECB – Press Conferences' },
+    { url: 'https://www.ecb.europa.eu/press/rss/press.xml', category: 'ECB', source: 'ECB – Press Releases' },
+    { url: 'https://www.bls.gov/feed/news_release/cpi.rss', category: 'CPI', source: 'BLS – CPI News Releases' },
+    { url: 'https://www.bankofengland.co.uk/boeapps/rss/feeds.aspx?feed=NewsReleases', category: 'Macro', source: 'Bank of England' },
+    { url: 'https://www.imf.org/external/whatshot.rss', category: 'Macro', source: 'IMF' },
   ];
   try {
-    const results = await Promise.allSettled(feeds.map(f => parser.parseURL(f)));
-    return results.flatMap(r => r.status === 'fulfilled' ? r.value.items.map(i => ({ title: i.title, url: i.link })) : []);
-  } catch {
+    const results = await Promise.allSettled(
+      feeds.map(async (f) => {
+        try {
+          const feed = await parser.parseURL(f.url);
+          return feed.items.map((item) => ({
+            title: item.title,
+            url: item.link,
+            source: f.source || feed.title || f.url,
+            category: f.category,
+            publishedAt: item.pubDate,
+          }));
+        } catch (e) {
+          console.warn('Failed macro RSS feed:', f.url, e instanceof Error ? e.message : e);
+          return [] as any[];
+        }
+      })
+    );
+    const aggregated = results.flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
+    // Basic dedupe by title
+    const seen = new Set<string>();
+    const deduped = aggregated.filter((i: any) => {
+      if (!i?.title) return false;
+      if (seen.has(i.title)) return false;
+      seen.add(i.title);
+      return true;
+    });
+    // Sort newest first if dates present
+    deduped.sort((a: any, b: any) => new Date(b.publishedAt || 0).getTime() - new Date(a.publishedAt || 0).getTime());
+    return deduped.slice(0, 50);
+  } catch (e) {
+    console.warn('getMacroNews failed', e instanceof Error ? e.message : e);
     return [];
   }
 }

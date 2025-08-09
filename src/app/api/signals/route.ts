@@ -3,7 +3,7 @@ import { calculateSignal, FullSignalResult } from '../../../lib/signals';
 
 // Simple in-memory cache with TTL to reduce external calls
 const cache: Record<string, { ts: number; data: FullSignalResult }> = {};
-const TTL = 1000 * 60; // 1 minute per pair/timeframe
+const TTL = 1000 * 60 * 3; // 3 minutes per pair/timeframe to smooth over provider delays
 
 // Central default pairs list (Forex majors/minors + popular cryptos)
 const DEFAULT_PAIRS = [
@@ -16,9 +16,10 @@ const DEFAULT_PAIRS = [
 ];
 
 const CRYPTO_BASES = /^(BTC|ETH|SOL|XRP|ADA|DOGE|BNB|LTC|DOT|AVAX|LINK|MATIC|TRX|SHIB|BCH|XLM|NEAR|UNI)$/;
-const BATCH_SIZE = 6; // number of pairs processed concurrently
-const PER_SIGNAL_TIMEOUT = 2500; // ms per signal calc
-const GLOBAL_BUDGET = 8000; // ms total budget for request
+// Tune batching/timeout to avoid initial cold-start fallbacks that show zeros
+const BATCH_SIZE = 4; // fewer concurrent calls to reduce provider throttling
+const PER_SIGNAL_TIMEOUT = 6000; // allow calc + one HTTP fallback path
+const GLOBAL_BUDGET = 20000; // enough for a couple of batches to complete
 
 async function withTimeout<T>(p: Promise<T>, ms: number, onTimeout: () => T): Promise<T> {
   return new Promise<T>((resolve) => {
@@ -27,7 +28,7 @@ async function withTimeout<T>(p: Promise<T>, ms: number, onTimeout: () => T): Pr
   });
 }
 
-function fallbackSignal(pair: string, timeframe: string, reason: string): FullSignalResult {
+function fallbackSignal(pair: string, timeframe: string, reason: string, prior?: FullSignalResult): FullSignalResult {
   const base = pair.split('/')[0].toUpperCase();
   const assetClass: 'Forex' | 'Crypto' = CRYPTO_BASES.test(base) ? 'Crypto' : 'Forex';
   return {
@@ -36,9 +37,9 @@ function fallbackSignal(pair: string, timeframe: string, reason: string): FullSi
     type: 'Hold',
     confidence: 0,
     timeframe,
-    buyLevel: 0,
-    stopLoss: 0,
-    takeProfit: 0,
+  buyLevel: prior?.buyLevel ?? 0,
+  stopLoss: prior?.stopLoss ?? 0,
+  takeProfit: prior?.takeProfit ?? 0,
     explanation: reason,
     news: [],
     indicators: { rsi: 0, sma50: 0, sma200: 0 },
@@ -68,16 +69,19 @@ export async function GET(req: Request) {
     const promises = batch.map(async (pair) => {
       const key = pair + ':' + timeframe;
       const now = Date.now();
-      if (cache[key] && now - cache[key].ts < TTL) {
-        return cache[key].data;
-      }
+      const cached = cache[key];
+      if (cached && now - cached.ts < TTL) return cached.data; // fresh
       if (Date.now() - start > GLOBAL_BUDGET) {
-        return fallbackSignal(pair, timeframe, 'Skipped (time budget)');
+        return fallbackSignal(pair, timeframe, 'Skipped (time budget)', cached?.data);
       }
       const calc = withTimeout(
         calculateSignal(pair, timeframe),
         PER_SIGNAL_TIMEOUT,
-        () => fallbackSignal(pair, timeframe, 'Timeout')
+        () => {
+          // On timeout, serve soft-stale cache if available instead of zeroed fallback
+          if (cached) return cached.data;
+          return fallbackSignal(pair, timeframe, 'Timeout');
+        }
       );
       try {
         const sig = await calc; // already timeout-wrapped
@@ -87,8 +91,8 @@ export async function GET(req: Request) {
         }
         return sig;
       } catch (e) {
-        const err = e instanceof Error ? e.message : String(e);
-        return fallbackSignal(pair, timeframe, `Error: ${err.slice(0, 60)}`);
+  const err = e instanceof Error ? e.message : String(e);
+  return fallbackSignal(pair, timeframe, `Error: ${err.slice(0, 60)}`, cached?.data);
       }
     });
     // eslint-disable-next-line no-await-in-loop

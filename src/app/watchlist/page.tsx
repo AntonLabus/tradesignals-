@@ -56,7 +56,7 @@ export default function WatchlistPage() {
           <li key={p} className="flex items-center justify-between p-3 bg-white/60 dark:bg-gray-800/60">
             <div>
               <div className="font-medium">{p}</div>
-              <div className="text-xs text-gray-500">1H alerts via polling</div>
+              <div className="text-xs text-gray-500">{getDefaultTimeframe()} alerts via polling</div>
             </div>
             <div className="flex items-center gap-2">
               <Link className="badge" href={`/signals/${encodeURIComponent(p.split('/')[0])}/${encodeURIComponent(p.split('/')[1] || 'USD')}`}>Open</Link>

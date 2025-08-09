@@ -117,7 +117,7 @@ const isCrypto = (pair: string): boolean => {
 
 const HISTORY_LOOKBACK: Record<string, number> = { '1m': 300, '5m': 300, '15m': 200, '30m': 180, '1H': 120, '4H': 90, '1D': 365 };
 
-interface PriceSeries { closes: number[]; highs?: number[]; lows?: number[]; source?: string }
+interface PriceSeries { closes: number[]; highs?: number[]; lows?: number[]; opens?: number[]; source?: string }
 
 // Reintroduce simple in-memory cache and fallback generator
 const memoryCache: Record<string, { ts: number; data: number[] }> = {};
@@ -150,17 +150,20 @@ async function syntheticSeriesFromLive(pair: string, timeframe: string): Promise
   const isC = isCrypto(pair);
   const vol = isC ? price * 0.015 : price * 0.002; // ~1.5% swing for crypto, 0.2% for FX
   const closes: number[] = [];
+  const opens: number[] = [];
   const highs: number[] = [];
   const lows: number[] = [];
   for (let i = 0; i < n; i++) {
     const base = price + Math.sin(i / 7) * vol * 0.25 + (Math.random() - 0.5) * vol * 0.05;
     const hi = base + (Math.random() * vol * 0.1);
     const lo = base - (Math.random() * vol * 0.1);
+    const open = i === 0 ? base : closes[i - 1];
+    opens.push(open);
     closes.push(base);
     highs.push(hi);
     lows.push(lo);
   }
-  return { closes, highs, lows, source: 'synthetic:live' };
+  return { closes, opens, highs, lows, source: 'synthetic:live' };
 }
 
 // Helper: fallback daily timeseries via exchangerate.host
@@ -215,20 +218,22 @@ function ohlcDays(timeframe: string): string {
 
 function parseOhlc(ohlc: Array<[number, number, number, number, number]> | undefined, timeframe: string): PriceSeries | null {
   if (!Array.isArray(ohlc) || !ohlc.length) return null;
+  const opens = ohlc.map(c => c[1]);
   const closes = ohlc.map(c => c[4]);
   const highs = ohlc.map(c => c[2]);
   const lows = ohlc.map(c => c[3]);
   if (timeframe === '4H') {
-    const dsClose: number[] = []; const dsHigh: number[] = []; const dsLow: number[] = [];
+    const dsOpen: number[] = []; const dsClose: number[] = []; const dsHigh: number[] = []; const dsLow: number[] = [];
     for (let i = 0; i < closes.length; i += 4) {
       const end = Math.min(i + 3, closes.length - 1);
+      dsOpen.push(opens[i]);
       dsClose.push(closes[end]);
       dsHigh.push(Math.max(...highs.slice(i, end + 1)));
       dsLow.push(Math.min(...lows.slice(i, end + 1)));
     }
-    return { closes: dsClose, highs: dsHigh, lows: dsLow, source: 'coingecko:ohlc:4h' };
+    return { opens: dsOpen, closes: dsClose, highs: dsHigh, lows: dsLow, source: 'coingecko:ohlc:4h' };
   }
-  return { closes, highs, lows, source: 'coingecko:ohlc' };
+  return { opens, closes, highs, lows, source: 'coingecko:ohlc' };
 }
 
 async function fetchFromMarketChart(id: string, timeframe: string): Promise<PriceSeries | null> {
@@ -343,24 +348,34 @@ async function fetchHistoricalData(pair: string, timeframe: string = '1H'): Prom
     return { closes: cached.data };
   }
   try {
-    const series = isCrypto(pair) ? await fetchCryptoHistoricalData(pair, timeframe) : await fetchForexHistoricalData(pair, timeframe);
+  const series = isCrypto(pair) ? await fetchCryptoHistoricalData(pair, timeframe) : await fetchForexHistoricalData(pair, timeframe);
     const sliceLen = HISTORY_LOOKBACK[timeframe] || 120;
   const closes = series.closes.slice(-sliceLen);
   const highs = series.highs?.slice(-sliceLen);
   const lows = series.lows?.slice(-sliceLen);
+  const opens = series.opens?.slice(-sliceLen) ?? deriveOpensFromCloses(closes);
   memoryCache[key] = { ts: now, data: series.closes }; // store full fetched closes for reuse
-  return { closes, highs, lows, source: series.source };
+  return { opens, closes, highs, lows, source: series.source };
   } catch (e) {
     console.error('Historical fetch failed, using synthetic series', e instanceof Error ? e.message : e);
     const synthetic = await syntheticSeriesFromLive(pair, timeframe);
     const L = seriesLengthFor(timeframe);
     return {
+      opens: synthetic.opens?.slice(-L) ?? deriveOpensFromCloses(synthetic.closes.slice(-L)),
       closes: synthetic.closes.slice(-L),
       highs: synthetic.highs?.slice(-L),
       lows: synthetic.lows?.slice(-L),
       source: synthetic.source,
     };
   }
+}
+
+function deriveOpensFromCloses(closes: number[]): number[] {
+  const opens: number[] = [];
+  for (let i = 0; i < closes.length; i++) {
+    opens.push(i === 0 ? closes[0] : closes[i - 1]);
+  }
+  return opens;
 }
 
 /**
@@ -597,6 +612,42 @@ function calcVolatility(closes: number[]): number {
   return Math.sqrt(variance);
 }
 
+// --- Lightweight pattern recognition and volatility filters ---
+function detectCandlestickPatterns(opens?: number[], highs?: number[], lows?: number[], closes?: number[]): { patterns: string[]; bullBias: number; bearBias: number } {
+  const result = { patterns: [] as string[], bullBias: 0, bearBias: 0 };
+  if (!opens || !highs || !lows || !closes) return result;
+  const n = Math.min(opens.length, highs.length, lows.length, closes.length);
+  if (n < 2) return result;
+  const o1 = opens[n - 2], c1 = closes[n - 2];
+  const o2 = opens[n - 1], c2 = closes[n - 1], h2 = highs[n - 1], l2 = lows[n - 1];
+  const body1 = Math.abs(c1 - o1), body2 = Math.abs(c2 - o2);
+  const range2 = h2 - l2;
+  const isBull2 = c2 > o2, isBear2 = c2 < o2;
+  // Engulfing
+  if (isBull2 && c1 < o1 && body2 > body1 && o2 <= c1 && c2 >= o1) { result.patterns.push('Bullish Engulfing'); result.bullBias += 0.15; }
+  if (isBear2 && c1 > o1 && body2 > body1 && o2 >= c1 && c2 <= o1) { result.patterns.push('Bearish Engulfing'); result.bearBias += 0.15; }
+  // Hammer / Shooting Star
+  const lower2 = Math.max(0, Math.min(o2, c2) - l2);
+  const upper2 = Math.max(0, h2 - Math.max(o2, c2));
+  if (range2 > 0 && lower2 / range2 > 0.6 && body2 / range2 < 0.3) { result.patterns.push('Hammer'); result.bullBias += 0.1; }
+  if (range2 > 0 && upper2 / range2 > 0.6 && body2 / range2 < 0.3) { result.patterns.push('Shooting Star'); result.bearBias += 0.1; }
+  // Doji
+  if (range2 > 0 && body2 / range2 < 0.1) { result.patterns.push('Doji'); }
+  return result;
+}
+
+function applyVolatilityFilters(volRatio: number, isCryptoAsset: boolean): { penalty: number; notes: string[] } {
+  const notes: string[] = [];
+  let penalty = 0;
+  const highThresh = isCryptoAsset ? 0.05 : 0.02; // 5% crypto, 2% FX
+  const veryHigh = isCryptoAsset ? 0.08 : 0.03;
+  const lowThresh = isCryptoAsset ? 0.003 : 0.001; // very low movement
+  if (volRatio > veryHigh) { penalty += 12; notes.push('Very high volatility'); }
+  else if (volRatio > highThresh) { penalty += 6; notes.push('High volatility'); }
+  if (volRatio < lowThresh) { penalty += 3; notes.push('Low volatility'); }
+  return { penalty, notes };
+}
+
 function getFundBias(score: number): DirectionBias {
   if (score > 55) return 'bull';
   if (score < 45) return 'bear';
@@ -623,6 +674,8 @@ function generateStructuredExplanation(input: {
   volatilityPct: number;
   riskReward: number;
   riskCategory: RiskCategory;
+  patterns?: string[];
+  filters?: string[];
 }): { flatExplanation: string; sections: { title: string; details: string[] }[] } {
   const {
     type,
@@ -638,6 +691,8 @@ function generateStructuredExplanation(input: {
     volatilityPct,
     riskReward,
     riskCategory,
+    patterns = [],
+    filters = [],
   } = input;
 
   const trend: string[] = [];
@@ -661,8 +716,20 @@ function generateStructuredExplanation(input: {
     { title: 'Momentum', details: momentum },
     { title: 'Fundamentals', details: [fundHeader, ...fundDetails] },
     { title: 'Risk', details: risk },
+    ...(patterns.length || filters.length ? [{ title: 'Patterns & Filters', details: [
+      ...(patterns.length ? [`Patterns: ${patterns.slice(-3).join(', ')}`] : []),
+      ...(filters.length ? [`Filters: ${filters.join(', ')}`] : []),
+    ] }] : []),
   ];
-  const flatExplanation = [sections[0].details[0], trend[1], momentum[0], momentum[1], risk.join(', ')].filter(Boolean).join(' | ');
+  const flatExplanation = [
+    sections[0].details[0],
+    trend[1],
+    momentum[0],
+    momentum[1],
+    patterns[patterns.length - 1],
+    filters[0],
+    risk.join(', ')
+  ].filter(Boolean).join(' | ');
   return { flatExplanation, sections };
 }
 /** Fetches historical close prices and computes a trading signal */
@@ -671,6 +738,11 @@ export async function calculateSignal(pair: string, timeframe: string = '1H'): P
   const series = await fetchHistoricalData(pair, timeframe);
   const volatility = calcVolatility(series.closes);
   const { lastClose, lastRSI, lastSMA, sma200, ema20, ema50, atr, macd, macdSignal, macdHist } = calculateIndicators(series, timeframe);
+  // Pattern recognition and volatility filters
+  const patterns = detectCandlestickPatterns(series.opens, series.highs, series.lows, series.closes);
+  const isC = isCrypto(pair);
+  const volRatio = volatility / lastClose;
+  const volFilter = applyVolatilityFilters(volRatio, isC);
   // Determine type
   const techType = determineSignalType(lastClose, lastSMA, lastRSI, macdHist);
   const above200 = lastClose > sma200 ? 1 : 0;
@@ -684,13 +756,16 @@ export async function calculateSignal(pair: string, timeframe: string = '1H'): P
     (above200 * 0.2) +
     (macdScore * 0.2) +
     ((lastRSI < 30 || lastRSI > 70 ? 1 : rsiNeutrality) * 0.15) +
-    (volatility > 0 ? Math.max(0, 1 - (volatility / lastClose) * 5) * 0.2 : 0)
+    (volatility > 0 ? Math.max(0, 1 - (volatility / lastClose) * 5) * 0.18 : 0) +
+    // small boost/drag from candle patterns
+    Math.max(-0.12, Math.min(0.12, (patterns.bullBias - patterns.bearBias)))
   );
   let confidence = Math.round(technicalComposite * 60 + fundamentals.score * 0.4);
+  // volatility filter penalties
+  confidence = Math.max(0, confidence - volFilter.penalty);
   confidence = Math.max(0, Math.min(100, confidence));
-  if (volatility > 0 && volatility / lastClose > 0.02) confidence = Math.max(0, confidence - 5);
+  if (volatility > 0 && volRatio > 0.02) confidence = Math.max(0, confidence - 5);
   const { fibs, demandZone, supplyZone } = buildPOIs(series.closes, series.highs, series.lows);
-  const isC = isCrypto(pair);
   const type = decideTypeWithPOI(techType, fundamentals.score, lastClose, atr, volatility, isC, { demandZone, supplyZone, fibs });
   const levels = computeLevels(type, lastClose, atr, volatility, isC, { demandZone, supplyZone });
   const riskReward = (levels.tp - levels.entry) / Math.max(1e-8, (levels.entry - levels.sl));
@@ -716,7 +791,10 @@ export async function calculateSignal(pair: string, timeframe: string = '1H'): P
     fundamentalsFactors: fundamentals.factors,
     volatilityPct,
     riskReward,
-    riskCategory
+  riskCategory,
+  // add patterns and filters to sections
+  patterns: patterns.patterns,
+  filters: volFilter.notes,
   });
   const explanation = [
     explanationData.flatExplanation,

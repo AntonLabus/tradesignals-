@@ -291,7 +291,7 @@ function withinZone(value: number, zone?: { low: number; high: number }, tol = 0
   return value >= zone.low - tol && value <= zone.high + tol;
 }
 
-function decideTypeWithPOI(
+export function decideTypeWithPOI(
   techType: SignalType,
   fundamentalsScore: number,
   lastClose: number,
@@ -319,7 +319,7 @@ function decideTypeWithPOI(
   return 'Hold';
 }
 
-function computeLevels(
+export function computeLevels(
   type: SignalType,
   lastClose: number,
   atr: number | undefined,

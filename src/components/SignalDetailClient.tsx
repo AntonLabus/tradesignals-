@@ -55,7 +55,7 @@ export default function SignalDetailClient({ signal }: { readonly signal: FullSi
       try {
         setLoading(true);
         setError(null);
-        const url = `/api/signals?pairs=${encodeURIComponent(signal.pair)}&timeframe=${encodeURIComponent(timeframe)}`;
+  const url = `/api/signals?pairs=${encodeURIComponent(signal.pair)}&timeframe=${encodeURIComponent(timeframe)}&debug=1`;
         const res = await fetch(url, { signal: controller.signal });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
@@ -160,6 +160,9 @@ export default function SignalDetailClient({ signal }: { readonly signal: FullSi
       <div className="bg-white dark:bg-gray-800 p-4 rounded shadow">
         <h2 className="text-xl font-semibold">Analysis & News</h2>
         <p className="mt-2 text-sm leading-relaxed">{currentSignal.explanation}</p>
+        {currentSignal.debugSource && (
+          <p className="mt-2 text-xs text-gray-400">data source: {currentSignal.debugSource}</p>
+        )}
         <h3 className="mt-4 font-semibold">Related News</h3>
         <ul className="list-disc list-inside mt-2 space-y-1 text-sm">
           {currentSignal.news.map((item) => (

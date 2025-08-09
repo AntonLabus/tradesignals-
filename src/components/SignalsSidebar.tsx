@@ -63,7 +63,7 @@ export default function SignalsSidebar({ signals, filters }: SignalsSidebarProps
             <label htmlFor="sidebar-timeframeFilter" className="block text-xs mb-1">Timeframe</label>
             <select id="sidebar-timeframeFilter" className="select-light w-full rounded-md border bg-white text-slate-900 px-2 py-1 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-cyan-400/60" value={timeframeFilter} onChange={(e) => setTimeframeFilter(e.target.value)}>
               <option value="All">All</option>
-              {timeframes.map(tf => <option key={tf} value={tf}>{tf}</option>)}
+              {timeframes.map(tf => <option key={tf} value={tf} className="text-slate-900 bg-white">{tf}</option>)}
             </select>
           </div>
         </div>

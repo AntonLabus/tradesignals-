@@ -13,7 +13,8 @@ export default function ClientLayout() {
   const [assetFilter, setAssetFilter] = useState<AssetFilter>('All');
   const [typeFilter, setTypeFilter] = useState<SignalTypeFilter>('All');
   const [timeframeFilter, setTimeframeFilter] = useState<string>('All');
-  const timeframes = useMemo(() => Array.from(new Set(allSignals.map(s => s.timeframe))), [allSignals]);
+  // Offer a full set of timeframes in the Dashboard regardless of currently loaded data
+  const timeframes = useMemo(() => ['1m', '5m', '15m', '30m', '1H', '4H', '1D'], []);
 
   return (
     <>

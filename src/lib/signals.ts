@@ -10,10 +10,12 @@ import { fetchFundamentalData } from './fundamentals';
 // Type aliases (code quality / reuse)
 export type SignalType = 'Buy' | 'Sell' | 'Hold';
 export type RiskCategory = 'Low' | 'Medium' | 'High';
+type DirectionBias = 'bull' | 'bear' | 'neutral';
+type AssetClass = 'Forex' | 'Crypto';
 
 export interface FullSignalResult {
   pair: string;
-  assetClass: 'Forex' | 'Crypto';
+  assetClass: AssetClass;
   type: SignalType;
   confidence: number;
   timeframe: string;
@@ -214,11 +216,153 @@ function calculateIndicators(prices: PriceSeries, timeframe: string) {
 /**
  * Determine signal type based on technical indicators
  */
-function determineSignalType(lastClose: number, lastSMA: number, lastRSI: number, macdHist?: number): 'Buy' | 'Sell' | 'Hold' {
+function determineSignalType(lastClose: number, lastSMA: number, lastRSI: number, macdHist?: number): SignalType {
   // Layered conditions with MACD confirmation
   if (lastClose > lastSMA && lastRSI < 35 && (macdHist ?? 0) > 0) return 'Buy';
   if (lastClose < lastSMA && lastRSI > 65 && (macdHist ?? 0) < 0) return 'Sell';
   return 'Hold';
+}
+
+// --- Points of Interest (POI) helpers ---
+function checkExtrema(values: number[], i: number, window: number) {
+  let isHigh = true, isLow = true;
+  const v = values[i];
+  for (let j = i - window; j <= i + window; j++) {
+    if (values[j] > v) isHigh = false;
+    if (values[j] < v) isLow = false;
+    if (!isHigh && !isLow) break;
+  }
+  return { isHigh, isLow, price: v };
+}
+function findSwingPoints(values: number[], window: number) {
+  const highs: { index: number; price: number }[] = [];
+  const lows: { index: number; price: number }[] = [];
+  const n = values.length;
+  for (let i = window; i < n - window; i++) {
+    const { isHigh, isLow, price } = checkExtrema(values, i, window);
+    if (isHigh) {
+      highs.push({ index: i, price });
+    } else if (isLow) {
+      lows.push({ index: i, price });
+    }
+  }
+  return { highs, lows };
+}
+
+function computeFibLevels(from: number, to: number) {
+  const range = to - from;
+  // Standard retracement set
+  return [0.382, 0.5, 0.618].map(r => to - range * r);
+}
+
+function buildPOIs(closes: number[], highs?: number[], lows?: number[]) {
+  const baseSeries = closes; // fall back to closes if OHLC not present
+  const window = Math.max(2, Math.floor(baseSeries.length / 40)); // adaptive
+  const swings = findSwingPoints(baseSeries, window);
+  const lastHigh = swings.highs[swings.highs.length - 1];
+  const lastLow = swings.lows[swings.lows.length - 1];
+  let fibs: number[] = [];
+  if (lastHigh && lastLow) {
+    if (lastLow.index < lastHigh.index) {
+      // up move
+      fibs = computeFibLevels(lastLow.price, lastHigh.price);
+    } else {
+      // down move, invert
+      const inv = computeFibLevels(lastHigh.price, lastLow.price);
+      fibs = inv;
+    }
+  }
+  // Define supply/demand zones around last swings with narrow pads
+  const demandZone = lastLow ? { low: lastLow.price * 0.999, high: lastLow.price * 1.001 } : undefined;
+  const supplyZone = lastHigh ? { low: lastHigh.price * 0.999, high: lastHigh.price * 1.001 } : undefined;
+  return { swings, fibs, demandZone, supplyZone };
+}
+
+function near(value: number, target: number, tol: number) {
+  return Math.abs(value - target) <= tol;
+}
+
+function nearAny(value: number, targets: number[], tol: number) {
+  return targets.some(t => near(value, t, tol));
+}
+
+function withinZone(value: number, zone?: { low: number; high: number }, tol = 0) {
+  if (!zone) return false;
+  return value >= zone.low - tol && value <= zone.high + tol;
+}
+
+function decideTypeWithPOI(
+  techType: SignalType,
+  fundamentalsScore: number,
+  lastClose: number,
+  atr: number | undefined,
+  volatility: number,
+  isCryptoAsset: boolean,
+  opts: { demandZone?: { low: number; high: number }; supplyZone?: { low: number; high: number }; fibs: number[] }
+): SignalType {
+  const priceTol = Math.max((atr ?? volatility) * 0.2, lastClose * (isCryptoAsset ? 0.005 : 0.001));
+  const nearDemand = withinZone(lastClose, opts.demandZone, priceTol);
+  const nearSupply = withinZone(lastClose, opts.supplyZone, priceTol);
+  const nearFib = opts.fibs.length ? nearAny(lastClose, opts.fibs, priceTol) : false;
+  const fundBias = getFundBias(fundamentalsScore);
+  const techBias = getTechBias(techType);
+  switch (techBias) {
+    case 'bull':
+      if ((nearDemand || nearFib) && fundBias !== 'bear') return 'Buy';
+      break;
+    case 'bear':
+      if ((nearSupply || nearFib) && fundBias !== 'bull') return 'Sell';
+      break;
+    default:
+      break;
+  }
+  return 'Hold';
+}
+
+function computeLevels(
+  type: SignalType,
+  lastClose: number,
+  atr: number | undefined,
+  volatility: number,
+  isCryptoAsset: boolean,
+  opts: { demandZone?: { low: number; high: number }; supplyZone?: { low: number; high: number } }
+) {
+  const entry = lastClose;
+  const slDist = atr ?? (isCryptoAsset ? entry * 0.01 : entry * 0.003);
+  const priceTol = Math.max((atr ?? volatility) * 0.2, lastClose * (isCryptoAsset ? 0.005 : 0.001));
+  let sl = type === 'Sell' ? entry + slDist : entry - slDist;
+  let tp = type === 'Sell' ? entry - slDist * 2 : entry + slDist * 2;
+  if (type === 'Buy') {
+    if (opts.demandZone) sl = Math.min(sl, opts.demandZone.low - priceTol);
+    if (opts.supplyZone) tp = Math.max(tp, opts.supplyZone.high + priceTol);
+  } else if (type === 'Sell') {
+    if (opts.supplyZone) sl = Math.max(sl, opts.supplyZone.high + priceTol);
+    if (opts.demandZone) tp = Math.min(tp, opts.demandZone.low - priceTol);
+  }
+  return { entry, sl, tp };
+}
+
+function buildPoiExplanation(
+  demandZone: { low: number; high: number } | undefined,
+  supplyZone: { low: number; high: number } | undefined,
+  fibs: number[]
+) {
+  const poiNotes: string[] = [];
+  if (demandZone) poiNotes.push(`Demand ${demandZone.low.toFixed(4)}–${demandZone.high.toFixed(4)}`);
+  if (supplyZone) poiNotes.push(`Supply ${supplyZone.low.toFixed(4)}–${supplyZone.high.toFixed(4)}`);
+  if (fibs.length) poiNotes.push(`Fib ${fibs.map(f => f.toFixed(4)).join(', ')}`);
+  return poiNotes.join(' | ');
+}
+
+function getFundBias(score: number): DirectionBias {
+  if (score > 55) return 'bull';
+  if (score < 45) return 'bear';
+  return 'neutral';
+}
+function getTechBias(type: SignalType): DirectionBias {
+  if (type === 'Buy') return 'bull';
+  if (type === 'Sell') return 'bear';
+  return 'neutral';
 }
 
 /**
@@ -306,7 +450,7 @@ export async function calculateSignal(pair: string, timeframe: string = '1H'): P
   const { lastClose, lastRSI, lastSMA, sma200, ema20, ema50, atr, macd, macdSignal, macdHist } = calculateIndicators(series, timeframe);
   
   // Determine signal type and confidence
-  const type = determineSignalType(lastClose, lastSMA, lastRSI, macdHist);
+  const techType = determineSignalType(lastClose, lastSMA, lastRSI, macdHist);
   // Trend momentum score
   const trendUp = lastClose > (ema50 ?? lastSMA) ? 1 : 0;
   const above200 = lastClose > sma200 ? 1 : 0;
@@ -325,18 +469,20 @@ export async function calculateSignal(pair: string, timeframe: string = '1H'): P
   let confidence = Math.round(technicalComposite * 60 + fundamentals.score * 0.4); // blend fundamental influence
   confidence = Math.max(0, Math.min(100, confidence));
   if (volatility > 0 && volatility / lastClose > 0.02) confidence = Math.max(0, confidence - 5);
-  // Risk / reward estimation based on naive levels
-  const provisionalEntry = lastClose;
-  const sl = provisionalEntry * 0.95;
-  const tp = provisionalEntry * 1.05;
-  const riskReward = (tp - provisionalEntry) / (provisionalEntry - sl);
+  const { fibs, demandZone, supplyZone } = buildPOIs(series.closes, series.highs, series.lows);
+  const isC = isCrypto(pair);
+  const type = decideTypeWithPOI(techType, fundamentals.score, lastClose, atr, volatility, isC, { demandZone, supplyZone, fibs });
+
+  // Determine levels anchored to POIs and ATR
+  const levels = computeLevels(type, lastClose, atr, volatility, isC, { demandZone, supplyZone });
+  const riskReward = (levels.tp - levels.entry) / Math.max(1e-8, (levels.entry - levels.sl));
   const riskCategory = classifyRisk(volatility / lastClose);
   const volatilityPct = (volatility / lastClose) * 100;
   const compositeScore = Math.round(technicalComposite * 100);
-  
-  // Fetch current price for levels
-  const price = await fetchCurrentPrice(pair, lastClose);
-  
+
+  // Fetch current price for display-calibrated rounding if provider available
+  const currentPrice = await fetchCurrentPrice(pair, lastClose);
+
   // Generate explanation
   const explanationData = generateStructuredExplanation({
     type,
@@ -353,7 +499,10 @@ export async function calculateSignal(pair: string, timeframe: string = '1H'): P
     riskReward,
     riskCategory
   });
-  const explanation = explanationData.flatExplanation; // keep legacy string
+  const explanation = [
+    explanationData.flatExplanation,
+    `POIs: ${buildPoiExplanation(demandZone, supplyZone, fibs)}`
+  ].join(' | ');
 
   return {
     pair,
@@ -361,9 +510,9 @@ export async function calculateSignal(pair: string, timeframe: string = '1H'): P
     type,
     confidence,
     timeframe,
-    buyLevel: parseFloat((price * 0.98).toFixed(4)),
-    stopLoss: parseFloat((price * 0.95).toFixed(4)),
-    takeProfit: parseFloat((price * 1.05).toFixed(4)),
+  buyLevel: parseFloat((levels.entry || currentPrice).toFixed(4)),
+  stopLoss: parseFloat(levels.sl.toFixed(4)),
+  takeProfit: parseFloat(levels.tp.toFixed(4)),
     explanation,
     news: fundamentals.news,
     indicators: { rsi: lastRSI, sma50: lastSMA, sma200, ema20, ema50, atr, macd, macdSignal, macdHist },

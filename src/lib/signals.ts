@@ -405,10 +405,16 @@ function calculateIndicators(prices: PriceSeries, timeframe: string) {
 /**
  * Determine signal type based on technical indicators
  */
-function determineSignalType(lastClose: number, lastSMA: number, lastRSI: number, macdHist?: number): SignalType {
-  // Layered conditions with MACD confirmation
-  if (lastClose > lastSMA && lastRSI < 35 && (macdHist ?? 0) > 0) return 'Buy';
-  if (lastClose < lastSMA && lastRSI > 65 && (macdHist ?? 0) < 0) return 'Sell';
+function determineSignalType(lastClose: number, lastSMA: number, lastRSI: number, macdHist?: number, ema20?: number, ema50?: number): SignalType {
+  // Tunable thresholds
+  const rsiBuy = Number(process.env.NEXT_PUBLIC_RSI_BUY ?? process.env.RSI_BUY ?? 55);
+  const rsiSell = Number(process.env.NEXT_PUBLIC_RSI_SELL ?? process.env.RSI_SELL ?? 45);
+  const macdConfirm = Number(process.env.NEXT_PUBLIC_MACD_CONFIRM ?? process.env.MACD_CONFIRM ?? 0);
+  const trendUp = ema20 != null && ema50 != null ? ema20 > ema50 : lastClose > lastSMA;
+  const trendDown = ema20 != null && ema50 != null ? ema20 < ema50 : lastClose < lastSMA;
+  // Looser, trend-following entries to increase trade frequency
+  if (trendUp && lastRSI >= rsiBuy && (macdHist ?? 0) >= macdConfirm) return 'Buy';
+  if (trendDown && lastRSI <= rsiSell && (macdHist ?? 0) <= -macdConfirm) return 'Sell';
   return 'Hold';
 }
 
@@ -744,7 +750,7 @@ export async function calculateSignal(pair: string, timeframe: string = '1H'): P
   const volRatio = volatility / lastClose;
   const volFilter = applyVolatilityFilters(volRatio, isC);
   // Determine type
-  const techType = determineSignalType(lastClose, lastSMA, lastRSI, macdHist);
+  const techType = determineSignalType(lastClose, lastSMA, lastRSI, macdHist, ema20, ema50);
   const above200 = lastClose > sma200 ? 1 : 0;
   const macdBias = macdBiasValue(macdHist);
   const macdScore = macdBiasScore(macdBias);

@@ -54,7 +54,7 @@ const SignalsTable = ({ filtered }: SignalsTableProps) => {
             </td>
             <td className="border px-4 py-2">
               <Link
-                href={`/signals/${encodeURIComponent(signal.pair)}`}
+                href={`/signals/${encodeURIComponent(signal.pair.split('/')[0])}/${encodeURIComponent(signal.pair.split('/')[1])}`}
                 className="text-blue-500 hover:underline"
               >
                 {signal.pair}

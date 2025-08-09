@@ -233,7 +233,7 @@ export default function SignalsTable({ signals: initial, showInlineFilters = tru
                       ) : null}
                     </td>
                     <td className="px-4 py-2 whitespace-nowrap">
-                      <Link href={`/signals/${encodeURIComponent(sig.pair)}`} className="text-neon-cyan hover:underline font-medium">
+                      <Link href={`/signals/${encodeURIComponent(sig.pair.split('/')[0])}/${encodeURIComponent(sig.pair.split('/')[1])}`} className="text-neon-cyan hover:underline font-medium">
                         {sig.pair}
                       </Link>
                       <div className="text-[10px] text-gray-400">{sig.assetClass}</div>

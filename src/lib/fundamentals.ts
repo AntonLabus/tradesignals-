@@ -27,7 +27,7 @@ function computeHeadlineSentiment(titles: string[]): { raw: number; normalized: 
 }
 
 // Simplified cache structure storing only external data (pair specific base score recomputed each call)
-let fundamentalsCache: { ts: number; articles: any[]; macroNews: any[]; globalCrypto: any; fng: any; sentiment: { normalized: number; descriptor: string } } | null = null;
+let fundamentalsCache: { ts: number; articles: any[]; macroNews: any[]; globalCrypto: any; fng: any } | null = null;
 
 // --- Helper functions to reduce cognitive complexity ---
 function baseScoreForPair(pair: string): number {
@@ -58,17 +58,28 @@ function buildResult(baseScore: number, pair: string, cacheData: { articles: any
   return computeAdjustments(baseScore, pair, cacheData.articles, cacheData.macroNews, cacheData.globalCrypto, cacheData.fng, cacheData.sentiment);
 }
 
-async function fetchExternalData(now: number): Promise<{ articles: any[]; macroNews: any[]; globalCrypto: any; fng: any; sentiment: { normalized: number; descriptor: string } }> {
+async function fetchExternalData(now: number): Promise<{ articles: any[]; macroNews: any[]; globalCrypto: any; fng: any }> {
   const [articles, fng, globalCrypto, macroNews] = await Promise.all([
     withTimeout(getNews(), 2500, () => []),
     withTimeout(getFearGreed(), 2500, () => ({ value: null, classification: null })),
     withTimeout(getGlobalCrypto(), 2500, () => ({ btcDominance: null, activeCryptos: null, marketCapChange24h: null })),
     withTimeout(getMacroNews(), 2500, () => [])
   ]);
-  const titles = articles.slice(0, 8).map((a: any) => a.title).filter(Boolean) as string[];
-  const sentiment = computeHeadlineSentiment(titles);
-  fundamentalsCache = { ts: now, articles, macroNews, globalCrypto, fng, sentiment };
-  return { articles, macroNews, globalCrypto, fng, sentiment };
+  fundamentalsCache = { ts: now, articles, macroNews, globalCrypto, fng };
+  return { articles, macroNews, globalCrypto, fng };
+}
+
+function computePairAwareSentiment(pair: string, articles: any[]): { normalized: number; descriptor: string } {
+  const [base, quote] = pair.split('/');
+  const boostTerms = [base.toUpperCase(), quote.toUpperCase(), base.toLowerCase(), quote.toLowerCase()];
+  const boosted = articles.map(a => {
+    const t = a.title || '';
+    const boost = boostTerms.some(term => t.includes(term)) ? 0.2 : 0;
+    return { ...a, boost };
+  });
+  const titles = boosted.map(a => a.title);
+  const sent = computeHeadlineSentiment(titles);
+  return { normalized: Math.max(-1, Math.min(1, sent.normalized + boosted.filter(b => b.boost > 0).length * 0.01)), descriptor: sent.descriptor };
 }
 
 // Placeholder economic + fundamental scoring. In real implementation integrate
@@ -82,7 +93,8 @@ export async function fetchFundamentalData(pair: string, timeframe: string = '1H
   // Try cache
   if (fundamentalsCache && now - fundamentalsCache.ts < TTL) {
     try {
-      return buildResult(baseScore, pair, fundamentalsCache);
+  const sentiment = computePairAwareSentiment(pair, fundamentalsCache.articles);
+  return computeAdjustments(baseScore, pair, fundamentalsCache.articles, fundamentalsCache.macroNews, fundamentalsCache.globalCrypto, fundamentalsCache.fng, sentiment);
     } catch (e) {
       console.warn('fundamentals cache reuse failed', e instanceof Error ? e.message : e);
     }
@@ -91,19 +103,9 @@ export async function fetchFundamentalData(pair: string, timeframe: string = '1H
   // Fetch fresh external data
   try {
     const ext = await fetchExternalData(now);
-    // Pair-aware sentiment weighting: boost headlines containing the base or quote symbol
-    const [base, quote] = pair.split('/');
-    const boostTerms = [base.toUpperCase(), quote.toUpperCase(), base.toLowerCase(), quote.toLowerCase()];
-    const boosted = ext.articles.map(a => {
-      const t = a.title || '';
-      const boost = boostTerms.some(term => t.includes(term)) ? 0.2 : 0;
-      return { ...a, boost };
-    });
-    const titles = boosted.map(a => a.title);
-    const sent = computeHeadlineSentiment(titles);
-    const sentiment = { normalized: Math.max(-1, Math.min(1, sent.normalized + boosted.filter(b => b.boost > 0).length * 0.01)), descriptor: sent.descriptor };
-    fundamentalsCache = { ts: now, articles: ext.articles, macroNews: ext.macroNews, globalCrypto: ext.globalCrypto, fng: ext.fng, sentiment };
-    return buildResult(baseScore, pair, fundamentalsCache);
+    const sentiment = computePairAwareSentiment(pair, ext.articles);
+    // Cache already set inside fetchExternalData; compute per-pair result
+    return computeAdjustments(baseScore, pair, ext.articles, ext.macroNews, ext.globalCrypto, ext.fng, sentiment);
   } catch (e) {
     console.warn('fetchFundamentalData failed', e instanceof Error ? e.message : e);
     return { score: baseScore, factors: ['Fundamental aggregation failed'], news: [] };

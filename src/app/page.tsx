@@ -1,12 +1,28 @@
 import Link from 'next/link';
 import { Metadata } from 'next';
+import type { FullSignalResult } from '../lib/signals';
 
 export const metadata: Metadata = {
   title: 'Home · TradeSignals',
   description: 'Overview of how TradeSignals generates Forex and Crypto trading signals',
 };
 
-export default function HomePage() {
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+export default async function HomePage() {
+  // Fetch current signals (default pairs) and surface active Buy/Sell
+  let active: FullSignalResult[] = [];
+  try {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL ?? ''}/api/signals?timeframe=1H&debug=1`, { cache: 'no-store', next: { revalidate: 0 } });
+    const json = await res.json();
+    const signals = (json?.signals ?? []) as FullSignalResult[];
+    active = signals.filter(s => s && (s.type === 'Buy' || s.type === 'Sell'))
+      .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
+      .slice(0, 8);
+  } catch {
+    // ignore; show static content if API unavailable
+  }
   return (
     <div className="space-y-12">
       {/* Hero */}
@@ -23,6 +39,34 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* Live Signals (Buy/Sell) */}
+      {active.length > 0 && (
+        <section className="glass p-6">
+          <h3 className="text-2xl font-semibold mb-3">Live Signals</h3>
+          <div className="grid md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {active.map(sig => {
+              const [base, quote] = (sig.pair || '').split('/');
+              const href = base && quote ? `/signals/${encodeURIComponent(base)}/${encodeURIComponent(quote)}` : '/signals';
+              const typeColor = sig.type === 'Buy' ? 'text-green-500' : 'text-red-500';
+              return (
+                <Link key={`${sig.pair}-${sig.timeframe}`} href={href} className="block bg-white/70 dark:bg-gray-800/70 rounded-md p-4 hover:bg-white/80 dark:hover:bg-gray-800 transition">
+                  <div className="flex items-center justify-between">
+                    <div className="font-semibold">{sig.pair}</div>
+                    <div className={`text-sm font-bold ${typeColor}`}>{sig.type}</div>
+                  </div>
+                  <div className="mt-1 text-xs text-gray-500">TF {sig.timeframe} · Conf {Math.round(sig.confidence)}%</div>
+                  <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                    <div><span className="text-gray-500">Buy</span><div className="font-mono">{sig.buyLevel?.toFixed?.(4) ?? '—'}</div></div>
+                    <div><span className="text-gray-500">SL</span><div className="font-mono">{sig.stopLoss?.toFixed?.(4) ?? '—'}</div></div>
+                    <div><span className="text-gray-500">TP</span><div className="font-mono">{sig.takeProfit?.toFixed?.(4) ?? '—'}</div></div>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* Feature grid */}
       <section id="how" className="grid md:grid-cols-3 gap-6">

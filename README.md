@@ -54,3 +54,11 @@ This project is configured for deployment on Netlify. Ensure the build command i
 	Controls when to re-anchor computed SL/TP levels to the current live price.
 	If the ratio between current price and last close exceeds this value, levels are re-anchored.
 	Default: `1.2` (20% difference). Must be greater than `1.0`.
+
+- LIVE_PRICE_ANCHOR_ATR_MULTIPLIER (or NEXT_PUBLIC_LIVE_PRICE_ANCHOR_ATR_MULTIPLIER):
+	Also re-anchors if absolute diff exceeds this multiple of ATR (or volatility when ATR missing).
+	Default: `5` (5x ATR).
+
+- LIVE_PRICE_ANCHOR_FX_PIPS (or NEXT_PUBLIC_LIVE_PRICE_ANCHOR_FX_PIPS):
+	For Forex only, re-anchors if absolute diff exceeds this pip distance (50 pips by default).
+	JPY pairs use pip size of 0.01; others 0.0001.

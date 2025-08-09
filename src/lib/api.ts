@@ -31,33 +31,57 @@ export async function getFearGreed() {
   }
 }
 
+async function tryFetchers<T>(fns: Array<() => Promise<T | null>>): Promise<T | null> {
+  for (const fn of fns) {
+    try {
+      const v = await fn();
+      if (v != null) return v;
+    } catch {
+      // continue
+    }
+  }
+  return null;
+}
+
 export async function getForexPrice(pair: string) {
   const key = process.env.ALPHA_VANTAGE_API_KEY;
   const [from, to] = pair.split('/');
-  if (key) {
-    try {
+
+  const result = await tryFetchers<number>([
+    async () => {
+      if (!key) return null;
       const res = await axios.get('https://www.alphavantage.co/query', {
-        params: {
-          function: 'CURRENCY_EXCHANGE_RATE',
-            from_currency: from,
-            to_currency: to,
-            apikey: key
-        }
+        params: { function: 'CURRENCY_EXCHANGE_RATE', from_currency: from, to_currency: to, apikey: key }
       });
-      const rate = parseFloat(res.data['Realtime Currency Exchange Rate']['5. Exchange Rate']);
-      return { price: rate };
-    } catch (e) {
-      console.warn('AlphaVantage realtime failed, fallback to exchangerate.host', e instanceof Error ? e.message : e);
+      const rate = parseFloat(res.data?.['Realtime Currency Exchange Rate']?.['5. Exchange Rate']);
+      return Number.isFinite(rate) && rate > 0 ? rate : null;
+    },
+    async () => {
+      const symbol = `${from}${to}=X`;
+      const res = await axios.get('https://query1.finance.yahoo.com/v7/finance/quote', { params: { symbols: symbol } });
+      const q = res.data?.quoteResponse?.result?.[0];
+      const rate = Number(q?.regularMarketPrice ?? q?.bid ?? q?.ask);
+      return Number.isFinite(rate) && rate > 0 ? rate : null;
+    },
+    async () => {
+      const fx = await axios.get('https://api.exchangerate.host/latest', { params: { base: from, symbols: to } });
+      const rate = Number(fx.data?.rates?.[to]);
+      return Number.isFinite(rate) && rate > 0 ? rate : null;
+    },
+    async () => {
+      const res = await axios.get('https://api.frankfurter.app/latest', { params: { from, to } });
+      const rate = Number(res.data?.rates?.[to]);
+      return Number.isFinite(rate) && rate > 0 ? rate : null;
+    },
+    async () => {
+      const res = await axios.get(`https://open.er-api.com/v6/latest/${from}`);
+      const rate = Number(res.data?.rates?.[to]);
+      return Number.isFinite(rate) && rate > 0 ? rate : null;
     }
-  }
-  try {
-    const fx = await axios.get('https://api.exchangerate.host/latest', { params: { base: from, symbols: to } });
-    const rate = fx.data?.rates?.[to];
-    return { price: rate ?? 0 };
-  } catch (e) {
-    console.error('Fallback forex price failed', e);
-    return { price: 0 };
-  }
+  ]);
+
+  if (result != null) return { price: result };
+  return { price: 0 };
 }
 
 export async function getNews() {

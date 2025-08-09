@@ -7,16 +7,63 @@ import { RSI, SMA, MACD, EMA, ATR } from 'technicalindicators';
 // Removed unused direct imports; fetchCurrentPrice will import lazily below
 import { fetchFundamentalData } from './fundamentals';
 
-// Config: live price anchoring threshold (ratio). If current price vs last close
-// differs by more than this ratio, we re-anchor computed levels to the live price.
-// Default is 1.2 (i.e., > 20% difference). Can be overridden via env var
-// LIVE_PRICE_ANCHOR_RATIO or NEXT_PUBLIC_LIVE_PRICE_ANCHOR_RATIO.
+// Config: live price anchoring thresholds.
+// If current price vs last close differs significantly by ratio, ATR multiple,
+// or Forex pip distance, we re-anchor computed levels to the live price.
+// Defaults target large discrepancies while remaining safe for Crypto.
+// You can override via LIVE_PRICE_ANCHOR_* env vars (or NEXT_PUBLIC_* variants).
 const LIVE_PRICE_ANCHOR_RATIO: number = (() => {
   const raw = process.env.LIVE_PRICE_ANCHOR_RATIO ?? process.env.NEXT_PUBLIC_LIVE_PRICE_ANCHOR_RATIO;
   const n = raw ? Number(raw) : 1.2;
   // Guardrails: require > 1.0 to make sense as a ratio, else fallback to default
   return Number.isFinite(n) && n > 1.0 ? n : 1.2;
 })();
+
+const LIVE_PRICE_ANCHOR_ATR_MULTIPLIER: number = (() => {
+  const raw = process.env.LIVE_PRICE_ANCHOR_ATR_MULTIPLIER ?? process.env.NEXT_PUBLIC_LIVE_PRICE_ANCHOR_ATR_MULTIPLIER;
+  const n = raw ? Number(raw) : 5; // default: 5x ATR
+  return Number.isFinite(n) && n > 0 ? n : 5;
+})();
+
+const LIVE_PRICE_ANCHOR_FX_PIPS: number = (() => {
+  const raw = process.env.LIVE_PRICE_ANCHOR_FX_PIPS ?? process.env.NEXT_PUBLIC_LIVE_PRICE_ANCHOR_FX_PIPS;
+  const n = raw ? Number(raw) : 50; // default: 50 pips
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 50;
+})();
+
+function isJpyPair(pair: string): boolean {
+  return pair.toUpperCase().includes('JPY');
+}
+
+function getFxPipSize(pair: string): number {
+  // Standard FX pip sizes: 0.0001 for most, 0.01 for JPY pairs
+  return isJpyPair(pair) ? 0.01 : 0.0001;
+}
+
+function shouldReanchorLevels(params: {
+  pair: string;
+  isCrypto: boolean;
+  lastClose: number;
+  currentPrice: number;
+  atr?: number;
+  volatility?: number;
+}): boolean {
+  const { pair, isCrypto, lastClose, currentPrice, atr, volatility } = params;
+  if (!Number.isFinite(currentPrice) || currentPrice <= 0) return false;
+  const minP = Math.min(currentPrice, lastClose);
+  const maxP = Math.max(currentPrice, lastClose);
+  const ratio = maxP / Math.max(1e-8, minP);
+  const absDiff = Math.abs(currentPrice - lastClose);
+  const atrOrVol = atr ?? volatility ?? 0;
+  const isFx = !isCrypto;
+  const pipSize = isFx ? getFxPipSize(pair) : 0;
+  const diffInPips = isFx && pipSize > 0 ? absDiff / pipSize : 0;
+
+  const ratioFlag = ratio > LIVE_PRICE_ANCHOR_RATIO;
+  const atrFlag = atrOrVol > 0 ? absDiff > LIVE_PRICE_ANCHOR_ATR_MULTIPLIER * atrOrVol : false;
+  const pipsFlag = isFx ? diffInPips > LIVE_PRICE_ANCHOR_FX_PIPS : false;
+  return ratioFlag || atrFlag || pipsFlag;
+}
 
 // Type aliases (code quality / reuse)
 export type SignalType = 'Buy' | 'Sell' | 'Hold';
@@ -497,13 +544,8 @@ export async function calculateSignal(pair: string, timeframe: string = '1H'): P
   // If live price and historical close differ materially (e.g., fallback series),
   // re-anchor levels around the live price to avoid mismatched scales in the UI.
   let displayLevels = levels;
-  if (Number.isFinite(currentPrice) && currentPrice > 0) {
-    const minP = Math.min(currentPrice, lastClose);
-    const maxP = Math.max(currentPrice, lastClose);
-    const ratio = maxP / Math.max(1e-8, minP);
-  if (ratio > LIVE_PRICE_ANCHOR_RATIO) {
-  displayLevels = computeLevels(type, currentPrice, atr, volatility, isC, { demandZone, supplyZone });
-    }
+  if (shouldReanchorLevels({ pair, isCrypto: isC, lastClose, currentPrice, atr, volatility })) {
+    displayLevels = computeLevels(type, currentPrice, atr, volatility, isC, { demandZone, supplyZone });
   }
   const effectiveRiskReward = (displayLevels.tp - displayLevels.entry) / Math.max(1e-8, (displayLevels.entry - displayLevels.sl));
 

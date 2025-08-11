@@ -802,7 +802,30 @@ export async function calculateSignal(pair: string, timeframe: string = '30m'): 
   confidence = Math.max(0, Math.min(100, confidence));
   if (volatility > 0 && volRatio > 0.02) confidence = Math.max(0, confidence - 5);
   const { fibs, demandZone, supplyZone } = buildPOIs(series.closes, series.highs, series.lows);
-  const type = decideTypeWithPOI(techType, fundamentals.score, lastClose, atr, volatility, isC, { demandZone, supplyZone, fibs });
+  const poiType = decideTypeWithPOI(techType, fundamentals.score, lastClose, atr, volatility, isC, { demandZone, supplyZone, fibs });
+
+  // --- Early Sell / Buy fallback logic ---
+  // If POI gating blocked a Sell but the technical trend is clearly down, allow a Sell without requiring proximity to supply/fib.
+  // Likewise, optionally allow earlier Buy if trend up and RSI close to threshold (user can tune via env).
+  let type = poiType;
+  if (poiType === 'Hold' && techType === 'Sell') {
+    const rsiSell = Number(process.env.NEXT_PUBLIC_RSI_SELL ?? process.env.RSI_SELL ?? 45);
+    const fundamentalsBullish = fundamentals.score >= 56; // same boundary as decideTypeWithPOI fund bias logic
+    const strongDownTrend = (ema20 != null && ema50 != null ? ema20 < ema50 : lastClose < lastSMA) && lastClose < sma200 * 0.9995; // below long-term MA
+    const momentumConfirm = (macdHist ?? 0) < 0 && lastRSI <= rsiSell + 5; // allow slight grace above raw sell RSI
+    if (!fundamentalsBullish && strongDownTrend && momentumConfirm) {
+      type = 'Sell';
+    }
+  } else if (poiType === 'Hold' && techType === 'Buy') {
+    // Earlier Buy: allow if RSI just under threshold but momentum + trend intact.
+    const rsiBuy = Number(process.env.NEXT_PUBLIC_RSI_BUY ?? process.env.RSI_BUY ?? 55);
+    const nearThreshold = lastRSI >= rsiBuy - 2; // within 2 RSI points
+    const strongUpTrend = (ema20 != null && ema50 != null ? ema20 > ema50 : lastClose > lastSMA) && lastClose > sma200 * 1.0005;
+    if (strongUpTrend && nearThreshold && (macdHist ?? 0) >= 0) {
+      type = 'Buy';
+    }
+  }
+
   const levels = computeLevels(type, lastClose, atr, volatility, isC, { demandZone, supplyZone });
   const riskReward = (levels.tp - levels.entry) / Math.max(1e-8, (levels.entry - levels.sl));
   const riskCategory = classifyRisk(volatility / lastClose);

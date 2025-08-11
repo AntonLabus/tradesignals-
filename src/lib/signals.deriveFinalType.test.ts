@@ -1,4 +1,4 @@
-import { deriveFinalType, _testCreateIndicatorBundle, decideTypeWithPOI } from './signals';
+import { deriveFinalType, _testCreateIndicatorBundle } from './signals';
 
 // Basic POI stub
 const poi = { fibs: [] as number[] };

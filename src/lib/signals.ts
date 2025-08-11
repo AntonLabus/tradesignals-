@@ -832,7 +832,7 @@ export async function calculateSignal(pair: string, timeframe: string = '30m'): 
 }
 
 // ---------------- Helper functions extracted to reduce calculateSignal complexity ----------------
-interface IndicatorBundle {
+export interface IndicatorBundle {
   lastClose: number; lastRSI: number; lastSMA: number; sma200: number; ema20?: number; ema50?: number; atr?: number; macd?: number; macdSignal?: number; macdHist?: number;
   volatility: number; patterns: { patterns: string[]; bullBias: number; bearBias: number }; isCryptoAsset: boolean; technicalComposite: number;
 }
@@ -877,7 +877,7 @@ function penalizeConfidence(confidence: number, volatility: number, volRatio: nu
 }
 
 interface POI { fibs: number[]; demandZone?: { low: number; high: number }; supplyZone?: { low: number; high: number } }
-function deriveFinalType(baseType: SignalType, fundamentalScore: number, bundle: IndicatorBundle, poi: POI, volCtx: VolContext): SignalType {
+export function deriveFinalType(baseType: SignalType, fundamentalScore: number, bundle: IndicatorBundle, poi: POI, volCtx: VolContext): SignalType {
   const decided = decideTypeWithPOI(baseType, fundamentalScore, bundle.lastClose, bundle.atr, bundle.volatility, volCtx.isCrypto, poi);
   if (decided !== 'Hold') return decided;
   const emaTrendUp = bundle.ema20 != null && bundle.ema50 != null ? bundle.ema20 > bundle.ema50 : bundle.lastClose > bundle.lastSMA;
@@ -924,6 +924,27 @@ function buildFinalExplanation(base: string, poi: POI, anchored: boolean, source
     anchored ? 'Anchored to live price' : undefined,
     source ? `src:${source}` : undefined
   ].filter(Boolean).join(' | ');
+}
+
+// Test helper (not used in production flow)
+export function _testCreateIndicatorBundle(partial: Partial<IndicatorBundle>): IndicatorBundle {
+  const base: IndicatorBundle = {
+    lastClose: 100,
+    lastRSI: 50,
+    lastSMA: 100,
+    sma200: 100,
+    ema20: 100,
+    ema50: 100,
+    atr: 1,
+    macd: 0,
+    macdSignal: 0,
+    macdHist: 0,
+    volatility: 1,
+    patterns: { patterns: [], bullBias: 0, bearBias: 0 },
+    isCryptoAsset: false,
+    technicalComposite: 0,
+  };
+  return { ...base, ...partial };
 }
 
 function macdBiasValue(hist?: number): number {

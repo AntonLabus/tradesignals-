@@ -98,6 +98,8 @@ export interface FullSignalResult {
   fundamentalScore?: number; // fundamentals raw
   explanationSections?: { title: string; details: string[] }[]; // structured explanation
   debugSource?: string;
+  debugTrace?: Record<string, any>; // optional diagnostics when SIGNAL_DEBUG enabled
+  gating?: { techBias: DirectionBias; fundBias: DirectionBias; nearDemand: boolean; nearSupply: boolean; nearFib: boolean; };
 }
 
 const TIMEFRAME_CONFIG: Record<string, { macdFast: number; macdSlow: number; macdSignal: number }> = {
@@ -436,15 +438,15 @@ function calculateIndicators(prices: PriceSeries, timeframe: string) {
  * Determine signal type based on technical indicators
  */
 function determineSignalType(lastClose: number, lastSMA: number, lastRSI: number, macdHist?: number, ema20?: number, ema50?: number): SignalType {
-  // Tunable thresholds
   const rsiBuy = Number(process.env.NEXT_PUBLIC_RSI_BUY ?? process.env.RSI_BUY ?? 55);
-  const rsiSell = Number(process.env.NEXT_PUBLIC_RSI_SELL ?? process.env.RSI_SELL ?? 45);
+  const rsiSellBase = Number(process.env.NEXT_PUBLIC_RSI_SELL ?? process.env.RSI_SELL ?? 45);
   const macdConfirm = Number(process.env.NEXT_PUBLIC_MACD_CONFIRM ?? process.env.MACD_CONFIRM ?? 0);
   const trendUp = ema20 != null && ema50 != null ? ema20 > ema50 : lastClose > lastSMA;
   const trendDown = ema20 != null && ema50 != null ? ema20 < ema50 : lastClose < lastSMA;
-  // Looser, trend-following entries to increase trade frequency
-  if (trendUp && lastRSI >= rsiBuy && (macdHist ?? 0) >= macdConfirm) return 'Buy';
-  if (trendDown && lastRSI <= rsiSell && (macdHist ?? 0) <= -macdConfirm) return 'Sell';
+  const macdH = macdHist ?? 0;
+  if (trendUp && lastRSI >= rsiBuy && macdH >= macdConfirm) return 'Buy';
+  // More permissive Sell: allow if (trendDown AND RSI <= base) OR (macd negative AND RSI below base+5)
+  if ((trendDown && lastRSI <= rsiSellBase) || (macdH < 0 && lastRSI <= rsiSellBase + 5)) return 'Sell';
   return 'Hold';
 }
 
@@ -688,8 +690,11 @@ function applyVolatilityFilters(volRatio: number, isCryptoAsset: boolean): { pen
 }
 
 function getFundBias(score: number): DirectionBias {
-  if (score > 55) return 'bull';
-  if (score < 45) return 'bear';
+  // Default thresholds aligned with tests: >55 bullish, <45 bearish, else neutral
+  const bullT = Number(process.env.FUND_BULL_THRESHOLD ?? process.env.NEXT_PUBLIC_FUND_BULL_THRESHOLD ?? 55);
+  const bearT = Number(process.env.FUND_BEAR_THRESHOLD ?? process.env.NEXT_PUBLIC_FUND_BEAR_THRESHOLD ?? 45);
+  if (score > bullT) return 'bull';
+  if (score < bearT) return 'bear';
   return 'neutral';
 }
 function getTechBias(t: SignalType): DirectionBias {
@@ -806,6 +811,39 @@ export async function calculateSignal(pair: string, timeframe: string = '30m'): 
     filters: volFilter.notes,
   });
   const explanation = buildFinalExplanation(explanationData.flatExplanation, poi, levelInfo.anchored, series.source);
+  // Optional debug trace to investigate missing Sell signals
+  let debugTrace: Record<string, any> | undefined;
+  const debugFlag = process.env.SIGNAL_DEBUG || process.env.NEXT_PUBLIC_SIGNAL_DEBUG;
+  if (debugFlag && ['1','true','yes','on'].includes(String(debugFlag).toLowerCase())) {
+    const rsiBuyThreshold = Number(process.env.NEXT_PUBLIC_RSI_BUY ?? process.env.RSI_BUY ?? 55);
+    const rsiSellThreshold = Number(process.env.NEXT_PUBLIC_RSI_SELL ?? process.env.RSI_SELL ?? 45);
+    debugTrace = {
+      fundamentalScore: fundamentals.score,
+      fundBias: getFundBias(fundamentals.score),
+      techBaseType: baseType,
+      finalType: type,
+      lastClose: indicatorBundle.lastClose,
+      rsi: indicatorBundle.lastRSI,
+      macdHist: indicatorBundle.macdHist,
+      ema20: indicatorBundle.ema20,
+      ema50: indicatorBundle.ema50,
+      sma50: indicatorBundle.lastSMA,
+      sma200: indicatorBundle.sma200,
+      atr: indicatorBundle.atr,
+      volatility: indicatorBundle.volatility,
+      thresholds: { rsiBuyThreshold, rsiSellThreshold, fundBullThreshold: process.env.FUND_BULL_THRESHOLD ?? 65, fundBearThreshold: process.env.FUND_BEAR_THRESHOLD ?? 35 },
+      poi: { hasDemand: !!poi.demandZone, hasSupply: !!poi.supplyZone, fibCount: poi.fibs.length },
+      composite: Math.round(indicatorBundle.technicalComposite * 100),
+    };
+  }
+  // Build lightweight gating diagnostics (regardless of debug flag) for UI troubleshooting
+  const gating = (() => {
+    const priceTol = Math.max((indicatorBundle.atr ?? indicatorBundle.volatility) * 0.2, indicatorBundle.lastClose * (indicatorBundle.isCryptoAsset ? 0.005 : 0.001));
+    const nearDemand = poi.demandZone ? (indicatorBundle.lastClose >= poi.demandZone.low - priceTol && indicatorBundle.lastClose <= poi.demandZone.high + priceTol) : false;
+    const nearSupply = poi.supplyZone ? (indicatorBundle.lastClose >= poi.supplyZone.low - priceTol && indicatorBundle.lastClose <= poi.supplyZone.high + priceTol) : false;
+    const nearFib = poi.fibs.length ? poi.fibs.some(f => Math.abs(indicatorBundle.lastClose - f) <= priceTol) : false;
+    return { techBias: getTechBias(baseType), fundBias: getFundBias(fundamentals.score), nearDemand, nearSupply, nearFib };
+  })();
   return {
     pair,
     assetClass: indicatorBundle.isCryptoAsset ? 'Crypto' : 'Forex',
@@ -831,6 +869,8 @@ export async function calculateSignal(pair: string, timeframe: string = '30m'): 
     fundamentalScore: fundamentals.score,
     explanationSections: explanationData.sections,
     debugSource: series.source,
+  debugTrace,
+  gating,
   };
 }
 

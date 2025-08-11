@@ -770,125 +770,158 @@ function generateStructuredExplanation(input: {
 }
 /** Fetches historical close prices and computes a trading signal */
 export async function calculateSignal(pair: string, timeframe: string = '30m'): Promise<FullSignalResult> {
-  // Fetch historical data
   const series = await fetchHistoricalData(pair, timeframe);
-  const volatility = calcVolatility(series.closes);
-  const { lastClose, lastRSI, lastSMA, sma200, ema20, ema50, atr, macd, macdSignal, macdHist } = calculateIndicators(series, timeframe);
-  // Pattern recognition and volatility filters
-  const patterns = detectCandlestickPatterns(series.opens, series.highs, series.lows, series.closes);
-  const isC = isCrypto(pair);
-  const volRatio = volatility / lastClose;
-  const volFilter = applyVolatilityFilters(volRatio, isC);
-  // Determine type
-  const techType = determineSignalType(lastClose, lastSMA, lastRSI, macdHist, ema20, ema50);
-  const above200 = lastClose > sma200 ? 1 : 0;
-  const macdBias = macdBiasValue(macdHist);
-  const macdScore = macdBiasScore(macdBias);
+  const indicatorBundle = prepareIndicators(series, timeframe);
   const fundamentals = await fetchFundamentalData(pair, timeframe);
-  const rsiNeutrality = 1 - Math.abs(50 - lastRSI) / 50;
-  const trendUp = lastClose > (ema50 ?? lastSMA) ? 1 : 0;
-  const technicalComposite = (
-    (trendUp * 0.25) +
-    (above200 * 0.2) +
-    (macdScore * 0.2) +
-    ((lastRSI < 30 || lastRSI > 70 ? 1 : rsiNeutrality) * 0.15) +
-    (volatility > 0 ? Math.max(0, 1 - (volatility / lastClose) * 5) * 0.18 : 0) +
-    // small boost/drag from candle patterns
-    Math.max(-0.12, Math.min(0.12, (patterns.bullBias - patterns.bearBias)))
-  );
-  let confidence = Math.round(technicalComposite * 60 + fundamentals.score * 0.4);
-  // volatility filter penalties
-  confidence = Math.max(0, confidence - volFilter.penalty);
-  confidence = Math.max(0, Math.min(100, confidence));
-  if (volatility > 0 && volRatio > 0.02) confidence = Math.max(0, confidence - 5);
-  const { fibs, demandZone, supplyZone } = buildPOIs(series.closes, series.highs, series.lows);
-  const poiType = decideTypeWithPOI(techType, fundamentals.score, lastClose, atr, volatility, isC, { demandZone, supplyZone, fibs });
-
-  // --- Early Sell / Buy fallback logic ---
-  // If POI gating blocked a Sell but the technical trend is clearly down, allow a Sell without requiring proximity to supply/fib.
-  // Likewise, optionally allow earlier Buy if trend up and RSI close to threshold (user can tune via env).
-  let type = poiType;
-  if (poiType === 'Hold' && techType === 'Sell') {
-    const rsiSell = Number(process.env.NEXT_PUBLIC_RSI_SELL ?? process.env.RSI_SELL ?? 45);
-    const fundamentalsBullish = fundamentals.score >= 56; // same boundary as decideTypeWithPOI fund bias logic
-    const strongDownTrend = (ema20 != null && ema50 != null ? ema20 < ema50 : lastClose < lastSMA) && lastClose < sma200 * 0.9995; // below long-term MA
-    const momentumConfirm = (macdHist ?? 0) < 0 && lastRSI <= rsiSell + 5; // allow slight grace above raw sell RSI
-    if (!fundamentalsBullish && strongDownTrend && momentumConfirm) {
-      type = 'Sell';
-    }
-  } else if (poiType === 'Hold' && techType === 'Buy') {
-    // Earlier Buy: allow if RSI just under threshold but momentum + trend intact.
-    const rsiBuy = Number(process.env.NEXT_PUBLIC_RSI_BUY ?? process.env.RSI_BUY ?? 55);
-    const nearThreshold = lastRSI >= rsiBuy - 2; // within 2 RSI points
-    const strongUpTrend = (ema20 != null && ema50 != null ? ema20 > ema50 : lastClose > lastSMA) && lastClose > sma200 * 1.0005;
-    if (strongUpTrend && nearThreshold && (macdHist ?? 0) >= 0) {
-      type = 'Buy';
-    }
-  }
-
-  const levels = computeLevels(type, lastClose, atr, volatility, isC, { demandZone, supplyZone });
-  const riskReward = (levels.tp - levels.entry) / Math.max(1e-8, (levels.entry - levels.sl));
-  const riskCategory = classifyRisk(volatility / lastClose);
-  const volatilityPct = (volatility / lastClose) * 100;
-  const compositeScore = Math.round(technicalComposite * 100);
-  const currentPrice = await fetchCurrentPrice(pair, lastClose);
-  let displayLevels = levels;
-  // For intraday timeframes, always anchor to the live price snapshot.
-  // For daily, re-anchor only when the difference exceeds configured thresholds.
-  if (isIntraday(timeframe) || shouldReanchorLevels({ pair, isCrypto: isC, lastClose, currentPrice, atr, volatility })) {
-    displayLevels = computeLevels(type, currentPrice, atr, volatility, isC, { demandZone, supplyZone });
-  }
-  const effectiveRiskReward = (displayLevels.tp - displayLevels.entry) / Math.max(1e-8, (displayLevels.entry - displayLevels.sl));
+  const volContext = buildVolContext(indicatorBundle.volatility, indicatorBundle.lastClose, pair);
+  const volFilter = applyVolatilityFilters(volContext.volRatio, indicatorBundle.isCryptoAsset);
+  let confidence = computeConfidence(indicatorBundle, fundamentals.score, volFilter);
+  confidence = penalizeConfidence(confidence, indicatorBundle.volatility, volContext.volRatio);
+  const poi = buildPOIs(series.closes, series.highs, series.lows);
+  const baseType = determineSignalType(indicatorBundle.lastClose, indicatorBundle.lastSMA, indicatorBundle.lastRSI, indicatorBundle.macdHist, indicatorBundle.ema20, indicatorBundle.ema50);
+  const type = deriveFinalType(baseType, fundamentals.score, indicatorBundle, poi, volContext);
+  const levelPrep = buildAndMaybeAnchorLevels(type, indicatorBundle, poi, timeframe, pair);
+  const levelInfo = await resolveAnchoredLevels(levelPrep, indicatorBundle, poi, timeframe, pair);
+  const riskMetrics = finalizeRiskMetrics(levelInfo.levels, indicatorBundle.volatility, indicatorBundle.lastClose, indicatorBundle.technicalComposite);
   const explanationData = generateStructuredExplanation({
     type,
-    lastClose,
-    lastSMA,
-    sma200,
-    ema20,
-    ema50,
-    lastRSI,
-    macdHist,
+    lastClose: indicatorBundle.lastClose,
+    lastSMA: indicatorBundle.lastSMA,
+    sma200: indicatorBundle.sma200,
+    ema20: indicatorBundle.ema20,
+    ema50: indicatorBundle.ema50,
+    lastRSI: indicatorBundle.lastRSI,
+    macdHist: indicatorBundle.macdHist,
     fundamentalsScore: fundamentals.score,
     fundamentalsFactors: fundamentals.factors,
-    volatilityPct,
-    riskReward,
-  riskCategory,
-  // add patterns and filters to sections
-  patterns: patterns.patterns,
-  filters: volFilter.notes,
+    volatilityPct: riskMetrics.volatilityPct,
+    riskReward: riskMetrics.initialRR,
+    riskCategory: riskMetrics.riskCategory,
+    patterns: indicatorBundle.patterns.patterns,
+    filters: volFilter.notes,
   });
-  const explanation = [
-    explanationData.flatExplanation,
-    `POIs: ${buildPoiExplanation(demandZone, supplyZone, fibs)}`,
-    displayLevels !== levels ? 'Anchored to live price' : undefined,
-    series.source ? `src:${series.source}` : undefined
-  ].filter(Boolean).join(' | ');
+  const explanation = buildFinalExplanation(explanationData.flatExplanation, poi, levelInfo.anchored, series.source);
   return {
     pair,
-    assetClass: isC ? 'Crypto' : 'Forex',
+    assetClass: indicatorBundle.isCryptoAsset ? 'Crypto' : 'Forex',
     type,
     confidence,
     timeframe,
-  currentPrice,
-  lastClose,
-    buyLevel: parseFloat((displayLevels.entry || currentPrice).toFixed(4)),
-    stopLoss: parseFloat(displayLevels.sl.toFixed(4)),
-    takeProfit: parseFloat(displayLevels.tp.toFixed(4)),
+    currentPrice: levelInfo.currentPrice,
+    lastClose: indicatorBundle.lastClose,
+    buyLevel: parseFloat((levelInfo.levels.entry || levelInfo.currentPrice).toFixed(4)),
+    stopLoss: parseFloat(levelInfo.levels.sl.toFixed(4)),
+    takeProfit: parseFloat(levelInfo.levels.tp.toFixed(4)),
     explanation,
     stale: false,
     news: fundamentals.news,
-    indicators: { rsi: lastRSI, sma50: lastSMA, sma200, ema20, ema50, atr, macd, macdSignal, macdHist },
+    indicators: { rsi: indicatorBundle.lastRSI, sma50: indicatorBundle.lastSMA, sma200: indicatorBundle.sma200, ema20: indicatorBundle.ema20, ema50: indicatorBundle.ema50, atr: indicatorBundle.atr, macd: indicatorBundle.macd, macdSignal: indicatorBundle.macdSignal, macdHist: indicatorBundle.macdHist },
     fundamentals: { score: fundamentals.score, factors: fundamentals.factors },
-    riskReward: effectiveRiskReward,
-    riskCategory,
-    volatilityPct,
-    compositeScore,
+    riskReward: riskMetrics.effectiveRR,
+    riskCategory: riskMetrics.riskCategory,
+    volatilityPct: riskMetrics.volatilityPct,
+    compositeScore: Math.round(indicatorBundle.technicalComposite * 100),
     history: series.closes.slice(-120),
-    technicalScore: Math.round(technicalComposite * 100),
+    technicalScore: Math.round(indicatorBundle.technicalComposite * 100),
     fundamentalScore: fundamentals.score,
     explanationSections: explanationData.sections,
     debugSource: series.source,
   };
+}
+
+// ---------------- Helper functions extracted to reduce calculateSignal complexity ----------------
+interface IndicatorBundle {
+  lastClose: number; lastRSI: number; lastSMA: number; sma200: number; ema20?: number; ema50?: number; atr?: number; macd?: number; macdSignal?: number; macdHist?: number;
+  volatility: number; patterns: { patterns: string[]; bullBias: number; bearBias: number }; isCryptoAsset: boolean; technicalComposite: number;
+}
+function prepareIndicators(series: PriceSeries, timeframe: string): IndicatorBundle {
+  const { lastClose, lastRSI, lastSMA, sma200, ema20, ema50, atr, macd, macdSignal, macdHist } = calculateIndicators(series, timeframe);
+  const patterns = detectCandlestickPatterns(series.opens, series.highs, series.lows, series.closes);
+  const volatility = calcVolatility(series.closes);
+  const isCryptoAsset = false; // placeholder, caller sets correctly after determining asset class
+  // technicalComposite deferred until we know asset class & volatility context, compute minimal now
+  return { lastClose, lastRSI, lastSMA, sma200, ema20, ema50, atr, macd, macdSignal, macdHist, volatility, patterns, isCryptoAsset, technicalComposite: 0 };
+}
+
+interface VolContext { volRatio: number; isCrypto: boolean; }
+function buildVolContext(volatility: number, lastClose: number, pair: string): VolContext {
+  const isC = isCrypto(pair);
+  return { volRatio: lastClose > 0 ? volatility / lastClose : 0, isCrypto: isC };
+}
+
+function computeConfidence(bundle: IndicatorBundle, fundamentalScore: number, volFilter: { penalty: number }): number {
+  const above200 = bundle.lastClose > bundle.sma200 ? 1 : 0;
+  const macdBias = macdBiasValue(bundle.macdHist);
+  const macdScore = macdBiasScore(macdBias);
+  const rsiNeutrality = 1 - Math.abs(50 - bundle.lastRSI) / 50;
+  const trendUp = bundle.lastClose > (bundle.ema50 ?? bundle.lastSMA) ? 1 : 0;
+  const technicalComposite = (
+    (trendUp * 0.25) +
+    (above200 * 0.2) +
+    (macdScore * 0.2) +
+    ((bundle.lastRSI < 30 || bundle.lastRSI > 70 ? 1 : rsiNeutrality) * 0.15) +
+    (bundle.volatility > 0 ? Math.max(0, 1 - (bundle.volatility / bundle.lastClose) * 5) * 0.18 : 0) +
+    Math.max(-0.12, Math.min(0.12, (bundle.patterns.bullBias - bundle.patterns.bearBias)))
+  );
+  bundle.technicalComposite = technicalComposite; // mutate bundle to carry forward
+  let confidence = Math.round(technicalComposite * 60 + fundamentalScore * 0.4);
+  confidence = Math.max(0, confidence - volFilter.penalty);
+  return Math.max(0, Math.min(100, confidence));
+}
+
+function penalizeConfidence(confidence: number, volatility: number, volRatio: number): number {
+  if (volatility > 0 && volRatio > 0.02) return Math.max(0, confidence - 5);
+  return confidence;
+}
+
+interface POI { fibs: number[]; demandZone?: { low: number; high: number }; supplyZone?: { low: number; high: number } }
+function deriveFinalType(baseType: SignalType, fundamentalScore: number, bundle: IndicatorBundle, poi: POI, volCtx: VolContext): SignalType {
+  const decided = decideTypeWithPOI(baseType, fundamentalScore, bundle.lastClose, bundle.atr, bundle.volatility, volCtx.isCrypto, poi);
+  if (decided !== 'Hold') return decided;
+  const emaTrendUp = bundle.ema20 != null && bundle.ema50 != null ? bundle.ema20 > bundle.ema50 : bundle.lastClose > bundle.lastSMA;
+  const emaTrendDown = bundle.ema20 != null && bundle.ema50 != null ? bundle.ema20 < bundle.ema50 : bundle.lastClose < bundle.lastSMA;
+  const macdH = bundle.macdHist ?? 0;
+  // Early Sell fallback
+  if (baseType === 'Sell') {
+    const rsiSell = Number(process.env.NEXT_PUBLIC_RSI_SELL ?? process.env.RSI_SELL ?? 45);
+    if (fundamentalScore < 56 && emaTrendDown && bundle.lastClose < bundle.sma200 * 0.9995 && macdH < 0 && bundle.lastRSI <= rsiSell + 5) return 'Sell';
+  }
+  // Early Buy fallback
+  if (baseType === 'Buy') {
+    const rsiBuy = Number(process.env.NEXT_PUBLIC_RSI_BUY ?? process.env.RSI_BUY ?? 55);
+    if (emaTrendUp && bundle.lastClose > bundle.sma200 * 1.0005 && macdH >= 0 && bundle.lastRSI >= rsiBuy - 2) return 'Buy';
+  }
+  return 'Hold';
+}
+
+function buildAndMaybeAnchorLevels(type: SignalType, bundle: IndicatorBundle, poi: POI, timeframe: string, pair: string) {
+  const levels = computeLevels(type, bundle.lastClose, bundle.atr, bundle.volatility, isCrypto(pair), { demandZone: poi.demandZone, supplyZone: poi.supplyZone });
+  return { levels, bundle, timeframe, pair, type };
+}
+
+async function resolveAnchoredLevels(data: { levels: { entry: number; sl: number; tp: number }; bundle: IndicatorBundle; timeframe: string; pair: string; type: SignalType }, bundle: IndicatorBundle, poi: POI, timeframe: string, pair: string) {
+  const currentPrice = await fetchCurrentPrice(pair, bundle.lastClose);
+  let finalLevels = data.levels;
+  if (isIntraday(timeframe) || shouldReanchorLevels({ pair, isCrypto: isCrypto(pair), lastClose: bundle.lastClose, currentPrice, atr: bundle.atr, volatility: bundle.volatility })) {
+    finalLevels = computeLevels(data.type, currentPrice, bundle.atr, bundle.volatility, isCrypto(pair), { demandZone: poi.demandZone, supplyZone: poi.supplyZone });
+  }
+  return { currentPrice, levels: finalLevels, anchored: finalLevels.entry !== bundle.lastClose };
+}
+
+function finalizeRiskMetrics(levels: { entry: number; sl: number; tp: number }, volatility: number, lastClose: number, technicalComposite: number) {
+  const riskRewardInitial = (levels.tp - levels.entry) / Math.max(1e-8, (levels.entry - levels.sl));
+  const riskCategory = classifyRisk(volatility / lastClose);
+  const volatilityPct = (volatility / lastClose) * 100;
+  return { initialRR: riskRewardInitial, effectiveRR: riskRewardInitial, riskCategory, volatilityPct, technicalComposite };
+}
+
+function buildFinalExplanation(base: string, poi: POI, anchored: boolean, source?: string) {
+  return [
+    base,
+    `POIs: ${buildPoiExplanation(poi.demandZone, poi.supplyZone, poi.fibs)}`,
+    anchored ? 'Anchored to live price' : undefined,
+    source ? `src:${source}` : undefined
+  ].filter(Boolean).join(' | ');
 }
 
 function macdBiasValue(hist?: number): number {

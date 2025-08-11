@@ -774,6 +774,8 @@ export async function calculateSignal(pair: string, timeframe: string = '30m'): 
   const indicatorBundle = prepareIndicators(series, timeframe);
   const fundamentals = await fetchFundamentalData(pair, timeframe);
   const volContext = buildVolContext(indicatorBundle.volatility, indicatorBundle.lastClose, pair);
+  // ensure we propagate crypto classification to bundle before filters
+  indicatorBundle.isCryptoAsset = volContext.isCrypto;
   const volFilter = applyVolatilityFilters(volContext.volRatio, indicatorBundle.isCryptoAsset);
   let confidence = computeConfidence(indicatorBundle, fundamentals.score, volFilter);
   confidence = penalizeConfidence(confidence, indicatorBundle.volatility, volContext.volRatio);

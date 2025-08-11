@@ -7,6 +7,11 @@
   --bg: #0b1220;
 }
 html, body {
+  /* Default light mode subtle background; overridden in .dark */
+  background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+}
+
+html.dark, html.dark body {
   background: radial-gradient(1200px 800px at 10% -10%, rgba(34,225,255,0.08), transparent 60%),
               radial-gradient(1000px 700px at 110% 10%, rgba(161,47,255,0.08), transparent 60%),
               linear-gradient(180deg, #0b1220 0%, #0a0f1a 100%);
@@ -14,7 +19,11 @@ html, body {
 
 /* Glass panels */
 .glass {
-  @apply bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl shadow-soft;
+  @apply backdrop-blur-md rounded-2xl shadow-soft border;
+  @apply bg-white/70 border-slate-200 text-slate-900;
+}
+.dark .glass {
+  @apply bg-white/5 border-white/10 text-slate-100;
 }
 .neon-divider {
   @apply h-px bg-gradient-to-r from-neon-cyan/60 via-neon-violet/60 to-neon-pink/60;
@@ -23,8 +32,9 @@ html, body {
   @apply relative inline-flex items-center justify-center px-5 py-2 rounded-xl text-white bg-gradient-to-r from-neon-cyan via-neon-violet to-neon-pink shadow-neon transition-transform hover:scale-[1.02];
 }
 .card {
-  @apply glass p-5 hover:shadow-neon transition-shadow;
+  @apply glass p-5 transition-shadow;
 }
+.dark .card:hover { @apply shadow-neon; }
 .badge {
   @apply inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border border-white/10 bg-white/5;
 }

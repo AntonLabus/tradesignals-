@@ -19,7 +19,7 @@ describe('deriveFinalType fallbacks', () => {
     expect(['Sell','Hold']).toContain(t); // allow Sell fallback
   });
 
-  it('blocks Sell fallback if fundamentals bullish', () => {
+  it('blocks Sell fallback if fundamentals bullish (symmetric gating)', () => {
     const bundle = _testCreateIndicatorBundle({
       lastClose: 99,
       lastSMA: 101,
@@ -29,11 +29,11 @@ describe('deriveFinalType fallbacks', () => {
       macdHist: -0.5,
       lastRSI: 47,
     });
-    const t = deriveFinalType('Sell', 70, bundle, poi, volCtx); // bullish fundamentals
+    const t = deriveFinalType('Sell', 70, bundle, poi, volCtx); // fundamentals bullish
     expect(t).toBe('Hold');
   });
 
-  it('returns Buy fallback when baseType Buy and near RSI threshold + uptrend', () => {
+  it('returns Buy fallback when baseType Buy and near RSI threshold + uptrend and fundamentals not bearish', () => {
     const bundle = _testCreateIndicatorBundle({
       lastClose: 101,
       lastSMA: 100,
@@ -45,6 +45,20 @@ describe('deriveFinalType fallbacks', () => {
     });
     const t = deriveFinalType('Buy', 50, bundle, poi, volCtx);
     expect(['Buy','Hold']).toContain(t);
+  });
+
+  it('blocks Buy fallback if fundamentals bearish', () => {
+    const bundle = _testCreateIndicatorBundle({
+      lastClose: 101,
+      lastSMA: 100,
+      sma200: 100,
+      ema20: 102,
+      ema50: 100,
+      macdHist: 0.3,
+      lastRSI: 53,
+    });
+    const t = deriveFinalType('Buy', 40, bundle, poi, volCtx);
+    expect(t).toBe('Hold');
   });
 
   it('holds when no fallback criteria met', () => {

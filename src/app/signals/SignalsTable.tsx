@@ -61,7 +61,7 @@ export default function SignalsTable({ signals: initial, showInlineFilters = tru
   const setTimeframeFilter = externalFilters?.setTimeframeFilter ?? setTimeframeFilterInternal;
 
   async function fetchAll(controller: AbortController) {
-    const res = await fetch(`/api/signals`, { signal: controller.signal });
+    const res = await fetch(`/api/signals?fresh=1`, { signal: controller.signal, cache: 'no-store' as RequestCache });
     if (!res.ok) throw new Error(`Status ${res.status}`);
     return res.json();
   }
@@ -71,8 +71,8 @@ export default function SignalsTable({ signals: initial, showInlineFilters = tru
     const combined: FullSignalResult[] = [];
     for (let i = 0; i < pairs.length; i += batchSize) {
       const batch = pairs.slice(i, i + batchSize);
-      const url = `/api/signals?pairs=${encodeURIComponent(batch.join(','))}&timeframe=${encodeURIComponent(timeframe)}`;
-      const res = await fetch(url, { signal: controller.signal });
+  const url = `/api/signals?pairs=${encodeURIComponent(batch.join(','))}&timeframe=${encodeURIComponent(timeframe)}&fresh=1&_=${Date.now()}`;
+  const res = await fetch(url, { signal: controller.signal, cache: 'no-store' as RequestCache });
       if (!res.ok) throw new Error(`Status ${res.status}`);
       const json = await res.json();
       combined.push(...(json.signals as FullSignalResult[]));
@@ -225,7 +225,7 @@ export default function SignalsTable({ signals: initial, showInlineFilters = tru
                 <React.Fragment key={sig.pair+sig.timeframe}>
                   <tr className="hover:bg-white/5 border-b-0" title={tfTooltip}>
                     <td className="px-4 py-2 relative">
-                      <SimpleChart pair={sig.pair} signalType={sig.type} confidence={sig.confidence} history={sig.history} />
+                      <SimpleChart pair={sig.pair} signalType={sig.type} confidence={sig.confidence} history={sig.history} timeframe={sig.timeframe} />
                       {showStale ? (
                         <div className="absolute top-1 left-1 flex items-center gap-1 text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded px-1.5 py-0.5" title="Refreshing">
                           <span className="inline-block w-2 h-2 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />

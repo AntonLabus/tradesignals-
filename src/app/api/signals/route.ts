@@ -61,6 +61,7 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const pairsParam = searchParams.get('pairs') || DEFAULT_PAIRS.join(',');
   const timeframe = sanitizeTimeframe(searchParams.get('timeframe'), getDefaultTimeframe());
+  const fresh = searchParams.get('fresh') === '1';
   const pairs = pairsParam.split(',').map(p => p.trim()).filter(Boolean);
 
   const results: FullSignalResult[] = [];
@@ -74,7 +75,7 @@ export async function GET(req: Request) {
       if (cache[key]) return; // already present
       if (Date.now() - start > GLOBAL_BUDGET / 2) return; // keep budget
       try {
-        const sig = await withTimeout(calculateSignal(pair, timeframe), PER_SIGNAL_TIMEOUT, () => fallbackSignal(pair, timeframe, 'Warm Timeout'));
+        const sig = await withTimeout(calculateSignal(pair, timeframe, { fresh }), PER_SIGNAL_TIMEOUT, () => fallbackSignal(pair, timeframe, 'Warm Timeout'));
         if (!(sig.confidence === 0 && sig.type === 'Hold' && /^(Timeout|Skipped|Warm)/.test(sig.explanation))) {
           cache[key] = { ts: Date.now(), data: sig };
         }
@@ -99,12 +100,12 @@ export async function GET(req: Request) {
       const now = Date.now();
       const cached = cache[key];
       const TTL = getTTL(timeframe);
-      if (cached && now - cached.ts < TTL) return cached.data; // fresh
+      if (!fresh && cached && now - cached.ts < TTL) return cached.data; // fresh
       if (Date.now() - start > GLOBAL_BUDGET) {
         return fallbackSignal(pair, timeframe, 'Skipped (time budget)', cached?.data);
       }
       const calc = withTimeout(
-        calculateSignal(pair, timeframe),
+        calculateSignal(pair, timeframe, { fresh }),
         PER_SIGNAL_TIMEOUT,
         () => {
           // On timeout, serve soft-stale cache if available instead of zeroed fallback

@@ -17,7 +17,7 @@ export default function WatchlistPage() {
     const id = setInterval(async () => {
       try {
   const params = new URLSearchParams({ timeframe: getDefaultTimeframe() });
-        const res = await fetch(`/api/signals?${params}`);
+  const res = await fetch(`/api/signals?${params}&fresh=1&_=${Date.now()}`, { cache: 'no-store' as RequestCache });
         const json = await res.json();
         const signals = json?.signals || [];
         const interesting = signals.filter((s: any) => pairs.includes(s.pair) && (s.type === 'Buy' || s.type === 'Sell'));

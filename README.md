@@ -63,6 +63,14 @@ This project is configured for deployment on Netlify. Ensure the build command i
 	For Forex only, re-anchors if absolute diff exceeds this pip distance (50 pips by default).
 	JPY pairs use pip size of 0.01; others 0.0001.
 
+- RSI_STRICT_MIRROR (or NEXT_PUBLIC_RSI_STRICT_MIRROR):
+	When true, RSI thresholds are mirrored exactly around 50: RSI_SELL = 100 - RSI_BUY.
+	This ensures Sell is the exact opposite of Buy for base rules.
+	Default in .env.example: true.
+
+- RSI_BUY and RSI_SELL:
+	Optional explicit thresholds. If RSI_STRICT_MIRROR is false, these values control asymmetry.
+
 	## Data Sources
 
 	- Crypto: CoinGecko (prices, historical)

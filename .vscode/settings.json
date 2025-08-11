@@ -1,7 +1,20 @@
 {
-  // Disable built-in CSS/SCSS validation to allow Tailwind directives
-  "css.validate": false,
-  "scss.validate": false,
+  // Silence the CSS language service warning for Tailwind at-rules (@tailwind, @apply, etc.)
   "css.lint.unknownAtRules": "ignore",
-  "scss.lint.unknownAtRules": "ignore"
+  "scss.lint.unknownAtRules": "ignore",
+  "less.lint.unknownAtRules": "ignore",
+
+  // Optional: disable built-in CSS/SCSS validation if it’s still noisy for Tailwind projects
+  // "css.validate": false,
+  // "scss.validate": false,
+
+  // Helpful Tailwind editor tweaks
+  "tailwindCSS.emmetCompletions": true,
+  "editor.quickSuggestions": {
+    "strings": true
+  },
+  // Associate CSS files with Tailwind language features
+  "files.associations": {
+    "*.css": "tailwindcss"
+  }
 }

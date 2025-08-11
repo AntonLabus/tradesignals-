@@ -6,10 +6,11 @@ export interface SimpleChartProps { // export for external type checking
   readonly signalType: 'Buy' | 'Sell' | 'Hold';
   readonly confidence: number;
   readonly history?: ReadonlyArray<number>; // optional closes for sparkline (readonly)
+  readonly timeframe?: string;
 }
 
 export default function SimpleChart(props: Readonly<SimpleChartProps>) {
-  const { pair, signalType, confidence, history } = props;
+  const { pair, signalType, confidence, history, timeframe } = props;
 
   // Use passed history if present; else generate small mock sequence (client-only)
   const data = React.useMemo(() => {
@@ -20,16 +21,24 @@ export default function SimpleChart(props: Readonly<SimpleChartProps>) {
       const step = Math.floor(history.length / maxPts) || 1;
       return history.filter((_, i) => i % step === 0).slice(-maxPts);
     }
-    // fallback mock
-    const points = 20;
+    // Seeded fallback so different pairs/timeframes are distinct
+    function hashString(s: string): number { let h = 2166136261 >>> 0; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+    let seed = hashString(`${pair}:${timeframe ?? ''}`);
+    const rand = () => { seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; seed >>>= 0; return (seed & 0x7fffffff) / 0x80000000; };
+    const points = 40;
     const arr: number[] = [];
-    let base = 100;
+    // Pair-aware base and volatility (rough heuristic)
+    const isJPY = /JPY/i.test(pair);
+    let base = isJPY ? 150 : 1.2;
+    const vol = isJPY ? 0.5 : 0.01;
     for (let i = 0; i < points; i++) {
-      base += (Math.random() - 0.5) * 10;
-      arr.push(base);
+      const wave = Math.sin(i / 6 + rand() * 0.3) * vol * 3;
+      const noise = (rand() - 0.5) * vol;
+      base += noise;
+      arr.push(base + wave);
     }
     return arr;
-  }, [history]);
+  }, [history, pair, timeframe]);
 
   const max = Math.max(...data);
   const min = Math.min(...data);

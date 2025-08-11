@@ -1,6 +1,40 @@
 import axios from 'axios';
 import Parser from 'rss-parser';
 
+// Minimal RSS item shape we rely on (avoids implicit any when no @types available)
+interface RSSItem {
+  title?: string;
+  link?: string;
+  contentSnippet?: string;
+  content?: string;
+  pubDate?: string;
+}
+
+// Simple per-URL failure cache to avoid hammering feeds that are returning 403/404/406 for a while
+const urlFailCache: Record<string, number> = {};
+const URL_FAIL_TTL_MS = 30 * 60 * 1000; // 30 minutes
+function markUrlFail(url: string) {
+  urlFailCache[url] = Date.now();
+}
+function shouldSkipUrl(url: string): boolean {
+  const ts = urlFailCache[url];
+  return !!ts && (Date.now() - ts) < URL_FAIL_TTL_MS;
+}
+
+// Shared helper to fetch and parse RSS XML with axios + rss-parser
+async function fetchRssFeed(url: string, parser: Parser, headers: Record<string, string>) {
+  try {
+    const res = await axios.get<string>(url, { timeout: 8000, headers, validateStatus: s => s === 200 });
+    const xml = typeof res.data === 'string' ? res.data : '';
+    if (!xml) throw new Error('empty XML');
+    const feed = await (parser as any).parseString(xml);
+    return feed;
+  } catch (e) {
+    markUrlFail(url);
+    throw e;
+  }
+}
+
 export async function getCryptoPrice(pair: string) {
   // Convert pair like 'BTC/USD' to CoinGecko ID 'bitcoin'
   const [base, quote] = pair.split('/');
@@ -107,6 +141,10 @@ export async function getForexPrice(pair: string) {
 
 export async function getNews() {
   const parser = new Parser();
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123 Safari/537.36',
+    'Accept': 'application/rss+xml, application/xml;q=0.9, */*;q=0.8'
+  } as const;
   // Collection of free RSS feeds (crypto + macro/markets)
   const feeds = [
     'https://cryptonews.com/news/feed.rss', // crypto
@@ -119,8 +157,9 @@ export async function getNews() {
   const results = await Promise.allSettled(
     feeds.map(async (url) => {
       try {
-        const feed = await parser.parseURL(url);
-        return feed.items.map(item => ({
+        if (shouldSkipUrl(url)) return [] as any[];
+  const feed = await fetchRssFeed(url, parser, headers as Record<string, string>);
+        return feed.items.map((item: RSSItem) => ({
           source: feed.title || url,
           title: item.title,
           url: item.link,
@@ -128,7 +167,10 @@ export async function getNews() {
           publishedAt: item.pubDate,
         }));
       } catch (e) {
-        console.warn('Failed RSS feed:', url, e instanceof Error ? e.message : e);
+        // Log once when first marked failed; subsequent attempts are skipped for TTL
+        if (!shouldSkipUrl(url)) {
+          console.warn('Failed RSS feed:', url, e instanceof Error ? e.message : e);
+        }
         return [] as any[];
       }
     })
@@ -149,26 +191,42 @@ export async function getNews() {
 }
 
 export async function getGlobalCrypto() {
-  // Narrow error handling: only catch the HTTP request; if it fails, return explicit fallback.
-  const res = await axios.get('https://api.coingecko.com/api/v3/global').catch(e => {
+  // Basic cache to avoid rate limits (429) and reduce noise
+  const now = Date.now();
+  const ttl = 10 * 60 * 1000; // 10 minutes
+  type GlobalCrypto = { btcDominance: number | null; activeCryptos: number | null; marketCapChange24h: number | null };
+  const key = 'coingecko:global';
+  const gcAny = (globalThis as any);
+  gcAny.__gcCache = gcAny.__gcCache || {} as Record<string, { ts: number; data: GlobalCrypto }>;
+  const cache: Record<string, { ts: number; data: GlobalCrypto }> = gcAny.__gcCache;
+  const cached = cache[key];
+  if (cached && now - cached.ts < ttl) return cached.data;
+  try {
+    const res = await axios.get('https://api.coingecko.com/api/v3/global', { timeout: 8000 });
+    const data = res?.data?.data;
+    const out: GlobalCrypto = data ? {
+      btcDominance: data.market_cap_percentage?.btc ?? null,
+      activeCryptos: data.active_cryptocurrencies ?? null,
+      marketCapChange24h: data.market_cap_change_percentage_24h_usd ?? null,
+    } : { btcDominance: null, activeCryptos: null, marketCapChange24h: null };
+    cache[key] = { ts: now, data: out };
+    return out;
+  } catch (e) {
+    // On failure, return cached value if any without spamming logs
+    if (cached) return cached.data;
     console.warn('Global crypto fetch failed', e instanceof Error ? e.message : e);
-    return null;
-  });
-  const data = res?.data?.data;
-  if (!data) {
     return { btcDominance: null, activeCryptos: null, marketCapChange24h: null };
   }
-  return {
-    btcDominance: data.market_cap_percentage?.btc ?? null,
-    activeCryptos: data.active_cryptocurrencies ?? null,
-    marketCapChange24h: data.market_cap_change_percentage_24h_usd ?? null,
-  };
 }
 
 // Extend news feeds (only free public RSS)
 // Inject extra macro feeds once at runtime; getNews already aggregates, so optionally we could expose a getMacroNews.
 export async function getMacroNews() {
   const parser = new Parser();
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123 Safari/537.36',
+    'Accept': 'application/rss+xml, application/xml;q=0.9, */*;q=0.8'
+  } as const;
   // Targeted macro sources: FOMC statements, ECB press, US CPI, plus others
   const feeds: { url: string; category: 'FOMC' | 'ECB' | 'CPI' | 'Macro'; source?: string }[] = [
     { url: 'https://www.federalreserve.gov/feeds/press_monetary.xml', category: 'FOMC', source: 'Federal Reserve – Monetary Policy' },
@@ -183,8 +241,9 @@ export async function getMacroNews() {
     const results = await Promise.allSettled(
       feeds.map(async (f) => {
         try {
-          const feed = await parser.parseURL(f.url);
-          return feed.items.map((item) => ({
+          if (shouldSkipUrl(f.url)) return [] as any[];
+          const feed = await fetchRssFeed(f.url, parser, headers as Record<string, string>);
+          return feed.items.map((item: RSSItem) => ({
             title: item.title,
             url: item.link,
             source: f.source || feed.title || f.url,
@@ -192,7 +251,9 @@ export async function getMacroNews() {
             publishedAt: item.pubDate,
           }));
         } catch (e) {
-          console.warn('Failed macro RSS feed:', f.url, e instanceof Error ? e.message : e);
+          if (!shouldSkipUrl(f.url)) {
+            console.warn('Failed macro RSS feed:', f.url, e instanceof Error ? e.message : e);
+          }
           return [] as any[];
         }
       })

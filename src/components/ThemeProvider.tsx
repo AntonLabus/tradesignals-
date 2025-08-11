@@ -7,5 +7,16 @@ interface NextThemesProviderProps {
 }
 
 export default function NextThemesProvider({ children }: NextThemesProviderProps) {
-  return <ThemeProvider attribute="class">{children}</ThemeProvider>;
+  return (
+    <ThemeProvider
+      attribute="class"
+      defaultTheme="system"
+      enableSystem
+      disableTransitionOnChange
+      themes={["light", "dark"]}
+      storageKey="ts-theme"
+    >
+      {children}
+    </ThemeProvider>
+  );
 }

@@ -1,5 +1,6 @@
 "use client";
 import React, { useEffect, useState } from 'react';
+import { useTheme } from 'next-themes';
 import dynamic from 'next/dynamic';
 import type { FullSignalResult } from '../lib/signals';
 
@@ -43,6 +44,7 @@ function EquitySparkline({ values }: Readonly<{ values: number[] }>) {
 }
 
 export default function SignalDetailClient({ signal }: { readonly signal: FullSignalResult }) {
+  const { resolvedTheme } = useTheme();
   const [timeframe, setTimeframe] = useState(signal.timeframe);
   const [currentSignal, setCurrentSignal] = useState<FullSignalResult>(signal);
   const [loading, setLoading] = useState(false);
@@ -94,7 +96,7 @@ export default function SignalDetailClient({ signal }: { readonly signal: FullSi
       try {
         setLoading(true);
         setError(null);
-        const url = `/api/signals?pairs=${encodeURIComponent(signal.pair)}&timeframe=${encodeURIComponent(timeframe)}&debug=1&_=${Date.now()}`;
+  const url = `/api/signals?pairs=${encodeURIComponent(signal.pair)}&timeframe=${encodeURIComponent(timeframe)}&debug=1&fresh=1&_=${Date.now()}`;
         const res = await fetch(url, { signal: controller.signal, cache: 'no-store' as RequestCache });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
@@ -162,7 +164,7 @@ export default function SignalDetailClient({ signal }: { readonly signal: FullSi
         <TradingViewWidget
           symbol={currentSignal.pair.replace('/', '')}
           autosize
-          theme="dark"
+          theme={(resolvedTheme ?? 'dark') === 'dark' ? 'dark' : 'light'}
           interval={tvInterval}
         />
       </div>

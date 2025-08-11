@@ -16,7 +16,8 @@ export default async function HomePage() {
   let active: FullSignalResult[] = [];
   try {
   const defaultTf = getDefaultTimeframe();
-  const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL ?? ''}/api/signals?timeframe=${defaultTf}&debug=1`, { cache: 'no-store', next: { revalidate: 0 } });
+  const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL ?? ''}/api/signals?timeframe=${defaultTf}&debug=1&fresh=1&_=${Date.now()}`,
+    { cache: 'no-store', next: { revalidate: 0 } });
     const json = await res.json();
     const signals = (json?.signals ?? []) as FullSignalResult[];
     active = signals.filter(s => s && (s.type === 'Buy' || s.type === 'Sell'))

@@ -2,6 +2,12 @@ import axios from 'axios';
 // Set axios defaults to keep provider fallbacks snappy
 axios.defaults.timeout = 3500; // 3.5s per request to bound sequential provider retries
 axios.defaults.maxRedirects = 0;
+// Some public APIs rate-limit or block generic UA; use a browser-like UA and JSON accept
+axios.defaults.headers.common = {
+  ...(axios.defaults.headers.common || {}),
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+  Accept: 'application/json, text/plain, */*',
+};
 
 import { RSI, SMA, MACD, EMA, ATR } from 'technicalindicators';
 // Removed unused direct imports; fetchCurrentPrice will import lazily below
@@ -139,6 +145,15 @@ function isIntraday(timeframe: string): boolean {
 
 // Generate a synthetic series centered around a live price (or a sane default)
 async function syntheticSeriesFromLive(pair: string, timeframe: string): Promise<PriceSeries> {
+  // Small seeded RNG so different pairs produce different synthetic histories
+  function hashString(s: string): number { let h = 2166136261 >>> 0; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+  let seed = hashString(pair + ':' + timeframe);
+  const rand = () => { // xorshift32
+    seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; seed >>>= 0; return (seed & 0x7fffffff) / 0x80000000; };
+
+  // FX-aware default price map when live fetch fails
+  const [, quoteSymRaw = 'USD'] = pair.split('/');
+  const quoteSym = (quoteSymRaw || 'USD').toUpperCase();
   let price = 0;
   try {
     const { getCryptoPrice, getForexPrice } = await import('./api');
@@ -153,20 +168,30 @@ async function syntheticSeriesFromLive(pair: string, timeframe: string): Promise
     // ignore, fallback below
   }
   if (!Number.isFinite(price) || price <= 0) {
-    // Conservative defaults if live fetch failed
-    price = isCrypto(pair) ? 100 : 1.1;
+    // Conservative defaults if live fetch failed (quote-based anchor for FX)
+    if (isCrypto(pair)) {
+      price = 100 * (0.9 + rand() * 0.2); // 90..110
+    } else {
+      const q = quoteSym;
+      const fxDefaults: Record<string, number> = {
+        USD: 1.1, EUR: 0.95, GBP: 0.80, JPY: 150, AUD: 1.60, CAD: 1.35, CHF: 0.92, NZD: 1.75,
+      };
+      price = (fxDefaults[q] ?? 1.0) * (0.98 + rand() * 0.04); // +/-2% variance
+    }
   }
   const n = seriesLengthFor(timeframe);
   const isC = isCrypto(pair);
-  const vol = isC ? price * 0.015 : price * 0.002; // ~1.5% swing for crypto, 0.2% for FX
+  const vol = isC ? price * 0.015 : price * 0.003; // ~1.5% swing for crypto, 0.3% for FX
   const closes: number[] = [];
   const opens: number[] = [];
   const highs: number[] = [];
   const lows: number[] = [];
   for (let i = 0; i < n; i++) {
-    const base = price + Math.sin(i / 7) * vol * 0.25 + (Math.random() - 0.5) * vol * 0.05;
-    const hi = base + (Math.random() * vol * 0.1);
-    const lo = base - (Math.random() * vol * 0.1);
+    const wave = Math.sin((i / 7) + rand() * 0.2) * vol * 0.25;
+    const noise = (rand() - 0.5) * vol * 0.06;
+    const base = price + wave + noise;
+    const hi = base + (rand() * vol * 0.12);
+    const lo = base - (rand() * vol * 0.12);
     const open = i === 0 ? base : closes[i - 1];
     opens.push(open);
     closes.push(base);
@@ -202,11 +227,39 @@ function mapCoinGeckoId(sym: string): string {
   return ID_MAP[sym] ?? sym;
 }
 
-function marketChartParams(timeframe: string): { vs_currency: 'usd'; days: string; interval: 'daily' | 'hourly' | 'minutely' } {
-  if (timeframe === '1D') return { vs_currency: 'usd', days: '400', interval: 'daily' };
-  if (timeframe === '1H' || timeframe === '4H') return { vs_currency: 'usd', days: '14', interval: 'hourly' };
-  if (timeframe === '1m' || timeframe === '5m' || timeframe === '15m' || timeframe === '30m') return { vs_currency: 'usd', days: '1', interval: 'minutely' };
-  return { vs_currency: 'usd', days: '30', interval: 'hourly' };
+// Cache resolved CoinGecko IDs discovered via search
+const COIN_ID_CACHE: Record<string, string> = {};
+async function resolveCoinGeckoId(sym: string): Promise<string> {
+  const s = sym.toLowerCase();
+  if (COIN_ID_CACHE[s]) return COIN_ID_CACHE[s];
+  const direct = mapCoinGeckoId(s);
+  if (direct && direct !== s) {
+    COIN_ID_CACHE[s] = direct;
+    return direct;
+  }
+  try {
+    const resp = await axios.get('https://api.coingecko.com/api/v3/search', { params: { query: s } });
+    const coins = resp.data?.coins as Array<{ id: string; symbol: string; name: string }> | undefined;
+    if (coins?.length) {
+      const exact = coins.find(c => c.symbol?.toLowerCase() === s);
+      const id = (exact ?? coins[0]).id;
+      if (id) {
+        COIN_ID_CACHE[s] = id;
+        return id;
+      }
+    }
+  } catch { /* ignore and fall back */ }
+  // Fall back to direct symbol (may 404 for unknowns)
+  COIN_ID_CACHE[s] = s;
+  return s;
+}
+
+function marketChartParams(timeframe: string, vsCurrency: string): { vs_currency: string; days: string; interval: 'daily' | 'hourly' | 'minutely' } {
+  const vc = (vsCurrency || 'usd').toLowerCase();
+  if (timeframe === '1D') return { vs_currency: vc, days: '400', interval: 'daily' };
+  if (timeframe === '1H' || timeframe === '4H') return { vs_currency: vc, days: '14', interval: 'hourly' };
+  if (timeframe === '1m' || timeframe === '5m' || timeframe === '15m' || timeframe === '30m') return { vs_currency: vc, days: '1', interval: 'minutely' };
+  return { vs_currency: vc, days: '30', interval: 'hourly' };
 }
 
 function parseMarketChartPrices(prices: Array<[number, number]> | undefined, timeframe: string): PriceSeries | null {
@@ -246,19 +299,19 @@ function parseOhlc(ohlc: Array<[number, number, number, number, number]> | undef
   return { opens, closes, highs, lows, source: 'coingecko:ohlc' };
 }
 
-async function fetchFromMarketChart(id: string, timeframe: string): Promise<PriceSeries | null> {
+async function fetchFromMarketChart(id: string, timeframe: string, vsCurrency: string): Promise<PriceSeries | null> {
   try {
-    const response = await axios.get(`https://api.coingecko.com/api/v3/coins/${id}/market_chart`, { params: marketChartParams(timeframe) });
+  const response = await axios.get(`https://api.coingecko.com/api/v3/coins/${id}/market_chart`, { params: marketChartParams(timeframe, vsCurrency) });
     return parseMarketChartPrices(response.data?.prices as Array<[number, number]> | undefined, timeframe);
   } catch {
     return null;
   }
 }
 
-async function fetchFromOHLC(id: string, timeframe: string): Promise<PriceSeries | null> {
+async function fetchFromOHLC(id: string, timeframe: string, vsCurrency: string): Promise<PriceSeries | null> {
   try {
     const days = ohlcDays(timeframe);
-    const resp = await axios.get(`https://api.coingecko.com/api/v3/coins/${id}/ohlc`, { params: { vs_currency: 'usd', days } });
+  const resp = await axios.get(`https://api.coingecko.com/api/v3/coins/${id}/ohlc`, { params: { vs_currency: (vsCurrency || 'usd').toLowerCase(), days } });
     return parseOhlc(resp.data as Array<[number, number, number, number, number]>, timeframe);
   } catch {
     return null;
@@ -281,16 +334,18 @@ async function firstAvailable<T>(fns: Array<() => Promise<T | null>>): Promise<T
  * Fetch historical crypto prices from CoinGecko with low complexity
  */
 async function fetchCryptoHistoricalData(pair: string, timeframe: string): Promise<PriceSeries> {
-  const sym = pair.split('/')[0].toLowerCase();
-  const id = mapCoinGeckoId(sym);
+  const [baseRaw, quoteRaw = 'USD'] = pair.split('/');
+  const sym = baseRaw.toLowerCase();
+  const vs = quoteRaw.toLowerCase();
+  const id = await resolveCoinGeckoId(sym);
   const series = await firstAvailable<PriceSeries>([
-    () => fetchFromMarketChart(id, timeframe),
-    () => fetchFromOHLC(id, timeframe),
+    () => fetchFromMarketChart(id, timeframe, vs),
+    () => fetchFromOHLC(id, timeframe, vs),
   async () => {
       // Yahoo Finance chart fallback for crypto (e.g., BTCUSD, ETHUSD)
       try {
-    const base = pair.split('/')[0].toUpperCase();
-    const quote = (pair.split('/')[1] || 'USD').toUpperCase();
+    const base = baseRaw.toUpperCase();
+    const quote = (quoteRaw || 'USD').toUpperCase();
     const chartSymbol = `${base}-${quote}`; // Crypto uses dash format on Yahoo (e.g., ETH-USD)
         let yfInterval = '60m';
         if (timeframe === '1m') yfInterval = '1m';
@@ -358,16 +413,14 @@ async function fetchForexHistoricalData(pair: string, timeframe: string): Promis
       // continue to next provider
     }
   }
-  // Synthetic last resort
-  const basePrice = 1.1;
-  const closes = Array.from({ length: 120 }, (_, i) => basePrice + Math.sin(i / 6) * 0.01 + (Math.random() - 0.5) * 0.002);
-  return { closes, source: 'synthetic' };
+  // Synthetic last resort (pair/timeframe-aware and FX-anchored)
+  return await syntheticSeriesFromLive(pair, timeframe);
 }
 
 /**
  * Fetch historical price data for a trading pair
  */
-async function fetchHistoricalData(pair: string, timeframe: string = '1H'): Promise<PriceSeries> {
+async function fetchHistoricalData(pair: string, timeframe: string = '1H', skipCache = false): Promise<PriceSeries> {
   const key = cacheKey(pair, timeframe);
   const now = Date.now();
   const cached = memoryCache[key];
@@ -376,8 +429,23 @@ async function fetchHistoricalData(pair: string, timeframe: string = '1H'): Prom
   if (timeframe === '1D') ttl = 1000 * 60 * 30;
   else if (timeframe === '4H') ttl = 1000 * 60 * 2;
   else ttl = 1000 * 60; // 1m..1H -> 60s
-  if (cached && now - cached.ts < ttl) {
+  if (!skipCache && cached && now - cached.ts < ttl) {
     return { closes: cached.data };
+  }
+  // If recent crypto fetch failed, skip remote for a short period to avoid thrashing and noisy logs
+  const failKey = `fail:${key}`;
+  const failTTL = 1000 * 60 * 2; // 2 minutes
+  const lastFail = (memoryCache as any)[failKey] as { ts: number; reason?: string } | undefined;
+  if (!skipCache && isCrypto(pair) && lastFail && now - lastFail.ts < failTTL) {
+    const synthetic = await syntheticSeriesFromLive(pair, timeframe);
+    const L = seriesLengthFor(timeframe);
+    return {
+      opens: synthetic.opens?.slice(-L) ?? deriveOpensFromCloses(synthetic.closes.slice(-L)),
+      closes: synthetic.closes.slice(-L),
+      highs: synthetic.highs?.slice(-L),
+      lows: synthetic.lows?.slice(-L),
+      source: `${synthetic.source}:soft-fail-skip`,
+    };
   }
   try {
   const series = isCrypto(pair) ? await fetchCryptoHistoricalData(pair, timeframe) : await fetchForexHistoricalData(pair, timeframe);
@@ -389,16 +457,24 @@ async function fetchHistoricalData(pair: string, timeframe: string = '1H'): Prom
   memoryCache[key] = { ts: now, data: series.closes }; // store full fetched closes for reuse
   return { opens, closes, highs, lows, source: series.source };
   } catch (e) {
-    console.error('Historical fetch failed, using synthetic series', e instanceof Error ? e.message : e);
+    const reason = e instanceof Error ? e.message : String(e);
+    // Mark a short failure window for crypto to avoid repeated remote calls
+    if (isCrypto(pair)) {
+      (memoryCache as any)[failKey] = { ts: now, reason };
+    }
+    console.warn(`Historical fetch failed [${pair} ${timeframe}], using synthetic series`, reason);
     const synthetic = await syntheticSeriesFromLive(pair, timeframe);
     const L = seriesLengthFor(timeframe);
-    return {
+    const result = {
       opens: synthetic.opens?.slice(-L) ?? deriveOpensFromCloses(synthetic.closes.slice(-L)),
       closes: synthetic.closes.slice(-L),
       highs: synthetic.highs?.slice(-L),
       lows: synthetic.lows?.slice(-L),
       source: synthetic.source,
     };
+    // Cache the synthetic briefly to prevent immediate re-fetch attempts
+    memoryCache[key] = { ts: now, data: result.closes };
+    return result;
   }
 }
 
@@ -438,8 +514,16 @@ function calculateIndicators(prices: PriceSeries, timeframe: string) {
  * Determine signal type based on technical indicators
  */
 function determineSignalType(lastClose: number, lastSMA: number, lastRSI: number, macdHist?: number, ema20?: number, ema50?: number): SignalType {
+  const strictMirror = (() => {
+    const v = process.env.NEXT_PUBLIC_RSI_STRICT_MIRROR ?? process.env.RSI_STRICT_MIRROR;
+    return v ? ['1','true','yes','on'].includes(String(v).toLowerCase()) : false;
+  })();
   const rsiBuy = Number(process.env.NEXT_PUBLIC_RSI_BUY ?? process.env.RSI_BUY ?? 55);
-  const rsiSell = Number(process.env.NEXT_PUBLIC_RSI_SELL ?? process.env.RSI_SELL ?? 45);
+  let rsiSell = Number(process.env.NEXT_PUBLIC_RSI_SELL ?? process.env.RSI_SELL ?? 45);
+  if (strictMirror) {
+    // Force perfect symmetry around 50 when enabled
+    rsiSell = Math.max(0, Math.min(100, 100 - rsiBuy));
+  }
   const macdConfirm = Number(process.env.NEXT_PUBLIC_MACD_CONFIRM ?? process.env.MACD_CONFIRM ?? 0);
   const trendUp = ema20 != null && ema50 != null ? ema20 > ema50 : lastClose > lastSMA;
   const trendDown = ema20 != null && ema50 != null ? ema20 < ema50 : lastClose < lastSMA;
@@ -768,8 +852,8 @@ function generateStructuredExplanation(input: {
   return { flatExplanation, sections };
 }
 /** Fetches historical close prices and computes a trading signal */
-export async function calculateSignal(pair: string, timeframe: string = '30m'): Promise<FullSignalResult> {
-  const series = await fetchHistoricalData(pair, timeframe);
+export async function calculateSignal(pair: string, timeframe: string = '30m', opts?: { fresh?: boolean }): Promise<FullSignalResult> {
+  const series = await fetchHistoricalData(pair, timeframe, !!opts?.fresh);
   const indicatorBundle = prepareIndicators(series, timeframe);
   const fundamentals = await fetchFundamentalData(pair, timeframe);
   const volContext = buildVolContext(indicatorBundle.volatility, indicatorBundle.lastClose, pair);
@@ -919,13 +1003,14 @@ export function deriveFinalType(baseType: SignalType, fundamentalScore: number, 
   const macdH = bundle.macdHist ?? 0;
   const rsiBuy = Number(process.env.NEXT_PUBLIC_RSI_BUY ?? process.env.RSI_BUY ?? 55);
   const rsiSell = Number(process.env.NEXT_PUBLIC_RSI_SELL ?? process.env.RSI_SELL ?? 45);
+  const fundBias = getFundBias(fundamentalScore);
   // Early Buy fallback
   if (baseType === 'Buy') {
-    if (emaTrendUp && bundle.lastClose > bundle.sma200 * 1.0005 && macdH >= 0 && bundle.lastRSI >= rsiBuy - 2) return 'Buy';
+    if (fundBias !== 'bear' && emaTrendUp && bundle.lastClose > bundle.sma200 * 1.0005 && macdH >= 0 && bundle.lastRSI >= rsiBuy - 2) return 'Buy';
   }
-  // Early Sell fallback (mirrored logic, but block if fundamentals are bullish)
+  // Early Sell fallback (exact mirror of Buy fallback)
   if (baseType === 'Sell') {
-    if (fundamentalScore <= 55 && emaTrendDown && bundle.lastClose < bundle.sma200 * 0.9995 && macdH <= 0 && bundle.lastRSI <= rsiSell + 2) return 'Sell';
+    if (fundBias !== 'bull' && emaTrendDown && bundle.lastClose < bundle.sma200 * 0.9995 && macdH <= 0 && bundle.lastRSI <= rsiSell + 2) return 'Sell';
   }
   return 'Hold';
 }

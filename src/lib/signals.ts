@@ -531,12 +531,15 @@ export function decideTypeWithPOI(
   const nearFib = opts.fibs.length ? nearAny(lastClose, opts.fibs, priceTol) : false;
   const fundBias = getFundBias(fundamentalsScore);
   const techBias = getTechBias(techType);
+  // Pre-compute potential relaxed sell condition (only used if bear bias)
+  const relaxedSellCandidate = (nearSupply || nearFib || (!nearDemand && !nearSupply)) && fundBias !== 'bull';
   switch (techBias) {
     case 'bull':
       if ((nearDemand || nearFib) && fundBias !== 'bear') return 'Buy';
       break;
     case 'bear':
-      if ((nearSupply || nearFib) && fundBias !== 'bull') return 'Sell';
+      // Relaxed Sell gating: allow Sell if (a) near supply, (b) near fib, or (c) not near demand
+      if (relaxedSellCandidate) return 'Sell';
       break;
     default:
       break;
@@ -886,7 +889,8 @@ export function deriveFinalType(baseType: SignalType, fundamentalScore: number, 
   // Early Sell fallback
   if (baseType === 'Sell') {
     const rsiSell = Number(process.env.NEXT_PUBLIC_RSI_SELL ?? process.env.RSI_SELL ?? 45);
-    if (fundamentalScore < 56 && emaTrendDown && bundle.lastClose < bundle.sma200 * 0.9995 && macdH < 0 && bundle.lastRSI <= rsiSell + 5) return 'Sell';
+  // Loosen fallback: remove strict SMA200 proximity requirement so more legitimate downtrends emit Sell
+  if (fundamentalScore < 56 && emaTrendDown && macdH < 0 && bundle.lastRSI <= rsiSell + 5) return 'Sell';
   }
   // Early Buy fallback
   if (baseType === 'Buy') {
